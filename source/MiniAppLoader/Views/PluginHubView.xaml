@@ -119,7 +119,7 @@
             <Button Grid.Column="1" Style="{StaticResource FlatButton}" Margin="6,0,0,0"
                     Content="+ Thêm"
                     ToolTip="Chọn file .dll để nạp (hoặc kéo thả thẳng vào pane)"
-                    Command="{Binding AddPluginCommand}"/>
+                    Command="{Binding BrowseCommand}"/>
 
             <Button Grid.Column="2" Style="{StaticResource FlatButton}" Margin="4,0,0,0"
                     Content="Nạp lại tất cả"
@@ -180,6 +180,8 @@
                                                     Orientation="Horizontal" Margin="0,4,0,0">
                                             <Button Style="{StaticResource FlatButton}" FontSize="11"
                                                     Content="Chạy"
+                                                    IsEnabled="{Binding DataContext.CanRunFromHub, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    ToolTip="{Binding DataContext.RunUnavailableReason, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                     Command="{Binding DataContext.RunCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                     CommandParameter="{Binding}"/>
                                             <Button Style="{StaticResource FlatButton}" FontSize="11" Margin="2,0,0,0"

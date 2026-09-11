@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using MiniAppLoader.Core.Runtime;
 using Nice3point.Revit.Toolkit;
 using Serilog;
 
@@ -23,7 +27,20 @@ namespace MiniAppLoader.Core;
 /// </summary>
 public sealed class PluginHost
 {
+    /// <summary>ID của dockable pane Plugin Hub. Cố định để Revit nhớ được vị trí neo.</summary>
+    public static readonly DockablePaneId HubPaneId = new(new Guid("6F8E1B42-2C55-4A7E-93B6-9C2D1A5E4F30"));
+
     private static PluginHost? _current;
+
+    private readonly ConfigStore _config;
+    private readonly PluginLoader _loader = new();
+    private readonly ReloadPipeline _pipeline;
+
+    private PluginHost(ConfigStore config)
+    {
+        _config = config;
+        _pipeline = new ReloadPipeline(ResolveSlot, OnWatcherReload);
+    }
 
     /// <summary>Instance của phiên Revit hiện tại.</summary>
     public static PluginHost Current =>
@@ -32,48 +49,82 @@ public sealed class PluginHost
 
     public SlotPool Slots { get; } = new();
 
-    /// <summary>ID của dockable pane Plugin Hub. Cố định để Revit nhớ được vị trí neo.</summary>
-    public static readonly DockablePaneId HubPaneId = new(new Guid("6F8E1B42-2C55-4A7E-93B6-9C2D1A5E4F30"));
+    /// <summary>Đường dẫn file config, hiện trong Plugin Hub để mở ra sửa tay khi cần.</summary>
+    public string ConfigPath => _config.ConfigPath;
 
-    internal static void Initialize() => _current = new PluginHost();
+    internal static void Initialize(string revitVersion, string? legacyConfigPath)
+        => _current = new PluginHost(new ConfigStore(revitVersion, legacyConfigPath));
+
+    internal static void Shutdown(UIControlledApplication application)
+    {
+        if (_current is null) return;
+
+        foreach (var slot in _current.Slots.ActiveSlots().Where(slot => slot.Kind == PluginKind.Application))
+        {
+            _current._loader.StopApplication(slot, EntryOf(slot));
+        }
+
+        _current._pipeline.Dispose();
+        _current = null;
+    }
+
+    // ---------------------------------------------------------------- khởi tạo từ config
 
     /// <summary>
-    ///     TẠM THỜI (Phase 2): nạp vài slot giả để kiểm chứng trong Revit thật rằng
-    ///     card layout render đúng, nút ribbon ẩn/hiện được, và stack panel không để lỗ
-    ///     hổng khi một phần nút đang ẩn. Phase 3 thay bằng ConfigStore đọc plugins.json.
+    ///     Nạp danh sách plugin từ <c>plugins.json</c> và dựng state ban đầu.
+    ///     <para>
+    ///         Gọi từ <c>OnStartup</c> với <see cref="UIControlledApplication"/> THẬT của
+    ///         Revit — plugin <c>Kind=Application</c> phải được <c>OnStartup</c> ngay lúc này
+    ///         mới kịp dựng ribbon của nó.
+    ///     </para>
     /// </summary>
-    internal void SeedDemoSlots()
+    internal void LoadFromConfig(UIControlledApplication application)
     {
-        var demo = new[]
-        {
-            ("SamplePlugin", @"D:\dev\SamplePluginin\Debug
-et8.0-windows\SamplePlugin.dll", PluginKind.Command, PluginStatus.Loaded),
-            ("Damper.Revit.App", @"D:\dev\Damper\Outcome\Damper.Revit.App.dll", PluginKind.Application, PluginStatus.Pending),
-            ("BrokenPlugin", @"D:\dev\Brokenin\Broken.dll", PluginKind.Command, PluginStatus.Error)
-        };
+        var entries = _config.Load();
 
-        foreach (var (id, path, kind, status) in demo)
+        if (entries.Count > SlotPool.MaxSlots)
+        {
+            Log.Warning("plugins.json có {Count} plugin nhưng chỉ có {Max} slot — {Extra} plugin cuối bị bỏ qua",
+                entries.Count, SlotPool.MaxSlots, entries.Count - SlotPool.MaxSlots);
+            entries = entries.Take(SlotPool.MaxSlots).ToList();
+        }
+
+        // Dọn rác shadow của PHIÊN TRƯỚC: lúc này chưa nạp gì nên chắc chắn không file nào
+        // đang bị phiên hiện tại khoá — đây là cơ hội duy nhất dọn được rác net48 để lại.
+        foreach (var directory in entries.Select(entry => Path.GetDirectoryName(entry.DllPath)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            ShadowCopy.CleanupDirectory(directory);
+        }
+
+        foreach (var entry in entries)
         {
             var slot = Slots.TakeFreeSlot();
             if (slot is null) break;
 
-            slot.Id = id;
-            slot.DllPath = path;
-            slot.ButtonText = id;
-            slot.Kind = kind;
-            slot.Status = status;
-            if (status == PluginStatus.Error) slot.LastError = "Demo: chưa nạp được DLL (dữ liệu giả của Phase 2).";
+            Bind(slot, entry);
 
-            // Kind=Application tự dựng ribbon riêng nên KHÔNG chiếm nút trên panel Plugins.
-            if (kind == PluginKind.Command) Slots.ShowButton(slot);
+            if (slot.Kind == PluginKind.Application)
+            {
+                // Plugin tự dựng ribbon riêng -> không chiếm nút trên panel Plugins, và phải
+                // chạy OnStartup ngay bây giờ như một add-in độc lập thật sự.
+                TryStartApplication(slot, entry, application);
+            }
+            else
+            {
+                Slots.ShowButton(slot);
+            }
+
+            if (slot.AutoReload) _pipeline.Watch(slot);
         }
+
+        Log.Information("Đã nạp {Count} plugin từ {Path}", entries.Count, _config.ConfigPath);
     }
 
-    internal static void Shutdown() => _current = null;
+    // ---------------------------------------------------------------- nút ribbon của plugin
 
     /// <summary>
-    ///     Nút ribbon của một plugin được bấm: reload DLL rồi chuyển tiếp
-    ///     <c>Execute</c> sang command thật của plugin.
+    ///     Nút ribbon của một plugin được bấm: nạp lại DLL rồi chuyển tiếp <c>Execute</c>
+    ///     sang command thật của plugin.
     ///     <para>
     ///         Đang chạy bên trong <c>IExternalCommand.Execute</c> của
     ///         <c>GenericCommandNN</c>, nên đã ở đúng API context và đúng thread — đây là lý
@@ -85,10 +136,26 @@ et8.0-windows\SamplePlugin.dll", PluginKind.Command, PluginStatus.Loaded),
     {
         var slot = Slots.Slots[index];
 
-        // Phase 3 sẽ thay bằng reload + Activator.CreateInstance command thật của plugin.
-        Log.Information("Slot {Index} ({Id}) được bấm", index, slot.Id);
-        TaskDialog.Show("MiniAppLoader", $"Slot {index:D2} — '{slot.Id}'.\nLõi loader sẽ được nối ở Phase 3.");
-        return Result.Succeeded;
+        if (slot.IsFree)
+        {
+            TaskDialog.Show("MiniAppLoader", "Slot này đã được gỡ. Mở Plugin Hub để gán plugin khác.");
+            return Result.Cancelled;
+        }
+
+        try
+        {
+            _loader.Reload(slot);
+            return _loader.CreateCommand(slot, EntryOf(slot).CommandClassName).Execute(data, ref message, elements);
+        }
+        catch (Exception exception)
+        {
+            slot.Status = PluginStatus.Error;
+            slot.LastError = exception.ToString();
+            message = exception.Message;
+
+            Log.Error(exception, "Chạy '{Id}' thất bại", slot.Id);
+            return Result.Failed;
+        }
     }
 
     /// <summary>
@@ -97,9 +164,9 @@ et8.0-windows\SamplePlugin.dll", PluginKind.Command, PluginStatus.Loaded),
     ///         <c>PostCommand</c> đẩy lệnh vào hàng đợi để Revit tự dựng
     ///         <c>ExternalCommandData</c> hợp lệ rồi gọi <c>Execute</c> — y hệt khi người
     ///         dùng bấm chuột. KHÔNG được thay bằng cách giữ lại một
-    ///         <c>ExternalCommandData</c> cũ: nó là wrapper quanh state native chỉ sống
-    ///         trong đúng một lần invoke, dùng lại sẽ giết Revit bằng access violation chứ
-    ///         không ném exception bắt được.
+    ///         <c>ExternalCommandData</c> cũ: nó là wrapper quanh state native chỉ sống trong
+    ///         đúng một lần invoke, dùng lại sẽ giết Revit bằng access violation chứ không
+    ///         ném exception bắt được.
     ///     </para>
     /// </summary>
     public bool TryRunSlot(PluginSlot slot)
@@ -107,7 +174,7 @@ et8.0-windows\SamplePlugin.dll", PluginKind.Command, PluginStatus.Loaded),
         var commandId = Slots.GetCommandId(slot.Index);
         if (commandId is null)
         {
-            Log.Warning("Slot {Index}: không tra được RevitCommandId, không Run từ Hub được", slot.Index);
+            Log.Warning("'{Id}': không tra được ID lệnh ribbon trên version Revit này", slot.Id);
             return false;
         }
 
@@ -118,9 +185,170 @@ et8.0-windows\SamplePlugin.dll", PluginKind.Command, PluginStatus.Loaded),
         }
         catch (Exception exception)
         {
-            // Revit ném InvalidOperationException nếu đang có command khác chạy dở.
-            Log.Warning(exception, "Không post được lệnh cho slot {Index}", slot.Index);
+            // Revit ném nếu đang có command khác chạy dở.
+            Log.Warning(exception, "Không post được lệnh cho '{Id}' — Revit đang bận?", slot.Id);
             return false;
         }
+    }
+
+    // ---------------------------------------------------------------- thêm / gỡ / nạp lại
+
+    /// <summary>Thêm một DLL làm plugin cố định: kiểm tra, gán slot, hiện nút, ghi config.</summary>
+    public (bool Success, string Message) AddPlugin(string dllPath)
+    {
+        if (!File.Exists(dllPath)) return (false, $"Không thấy file: {dllPath}");
+
+        var existing = Slots.ActiveSlots()
+            .FirstOrDefault(slot => string.Equals(slot.DllPath, dllPath, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null) return (false, $"'{existing.Id}' đã được nạp trước đó rồi.");
+
+        var slot = Slots.TakeFreeSlot();
+        if (slot is null) return (false, $"Đã dùng hết {SlotPool.MaxSlots} slot. Gỡ bớt một plugin trước.");
+
+        var id = Path.GetFileNameWithoutExtension(dllPath);
+        var entry = new PluginEntry { Id = id, DllPath = dllPath, ButtonText = id };
+        Bind(slot, entry);
+
+        try
+        {
+            // Nạp thử để biết DLL có hợp lệ và có entry point hay không, TRƯỚC khi ghi vào
+            // config — tránh để lại entry hỏng mà lần mở Revit sau vẫn cố nạp.
+            _loader.Reload(slot);
+            _loader.CreateCommand(slot, preferredClassName: null);
+        }
+        catch (Exception exception)
+        {
+            Release(slot);
+            Log.Error(exception, "Không nạp được '{Path}'", dllPath);
+            return (false, exception.Message);
+        }
+
+        Slots.ShowButton(slot);
+        _pipeline.Watch(slot);
+        SaveConfig();
+
+        Log.Information("Đã thêm plugin '{Id}' vào slot {Slot}", id, slot.Index);
+        return (true, $"Đã thêm '{id}' — nút đã có trên panel Plugins.");
+    }
+
+    /// <summary>Gỡ plugin: dừng theo dõi, gỡ khỏi bộ nhớ, ẩn nút, trả slot về pool, ghi config.</summary>
+    public void RemovePlugin(PluginSlot slot)
+    {
+        if (slot.IsFree) return;
+
+        var id = slot.Id;
+
+        if (slot.Kind == PluginKind.Application) _loader.StopApplication(slot, EntryOf(slot));
+
+        _pipeline.Unwatch(slot.Index);
+        _loader.Unload(slot);
+        Slots.HideButton(slot);
+        Release(slot);
+        SaveConfig();
+
+        Log.Information("Đã gỡ plugin '{Id}'", id);
+    }
+
+    /// <summary>Nạp lại một plugin theo yêu cầu thủ công từ Plugin Hub.</summary>
+    public void ReloadPlugin(PluginSlot slot)
+    {
+        if (slot.IsFree) return;
+
+        slot.Status = PluginStatus.Pending;
+        _pipeline.RequestReload(slot.Index);
+    }
+
+    /// <summary>Nạp lại toàn bộ plugin đang hoạt động.</summary>
+    public void ReloadAll()
+    {
+        foreach (var slot in Slots.ActiveSlots().ToList()) ReloadPlugin(slot);
+    }
+
+    /// <summary>Bật/tắt tự động nạp lại cho một plugin.</summary>
+    public void SetAutoReload(PluginSlot slot, bool enabled)
+    {
+        if (enabled) _pipeline.Watch(slot);
+        else _pipeline.Unwatch(slot.Index);
+
+        SaveConfig();
+    }
+
+    // ---------------------------------------------------------------- nội bộ
+
+    /// <summary>Được <see cref="ReloadPipeline"/> gọi trên main thread khi DLL đổi.</summary>
+    private void OnWatcherReload(PluginSlot slot, UIApplication application)
+    {
+        if (slot.Kind == PluginKind.Application)
+        {
+            var entry = EntryOf(slot);
+
+            // Gọi OnShutdown bản cũ + gỡ đúng phần ribbon nó đã thêm, rồi nạp và chạy lại.
+            _loader.StopApplication(slot, entry);
+            _loader.StartApplication(slot, entry, application.AsControlledApplication());
+            return;
+        }
+
+        _loader.Reload(slot);
+
+        // Plugin nào implement IHotCommand thì tự chạy lại luôn sau build — vòng lặp
+        // sửa-code / thấy-kết-quả không cần chạm chuột.
+        _loader.CreateHotCommand(slot)?.Execute(application);
+    }
+
+    private void TryStartApplication(PluginSlot slot, PluginEntry entry, UIControlledApplication application)
+    {
+        try
+        {
+            _loader.StartApplication(slot, entry, application);
+        }
+        catch (Exception exception)
+        {
+            slot.Status = PluginStatus.Error;
+            slot.LastError = exception.ToString();
+            Log.Error(exception, "Khởi động plugin '{Id}' (Kind=Application) thất bại", entry.Id);
+        }
+    }
+
+    private static void Bind(PluginSlot slot, PluginEntry entry)
+    {
+        slot.Entry = entry;
+        slot.Id = entry.Id;
+        slot.DllPath = entry.DllPath;
+        slot.ButtonText = entry.ButtonText ?? entry.Id;
+        slot.AutoReload = entry.AutoReload;
+        slot.Kind = string.Equals(entry.Kind, nameof(PluginKind.Application), StringComparison.OrdinalIgnoreCase)
+            ? PluginKind.Application
+            : PluginKind.Command;
+        slot.Status = PluginStatus.Idle;
+        slot.LastError = null;
+    }
+
+    private static void Release(PluginSlot slot)
+    {
+        slot.Entry = null;
+        slot.Id = string.Empty;
+        slot.DllPath = string.Empty;
+        slot.ButtonText = string.Empty;
+        slot.LastError = null;
+        slot.Status = PluginStatus.Removed;
+    }
+
+    private static PluginEntry EntryOf(PluginSlot slot) => slot.Entry ?? new PluginEntry { Id = slot.Id, DllPath = slot.DllPath };
+
+    private PluginSlot? ResolveSlot(int index) => index >= 0 && index < SlotPool.MaxSlots ? Slots.Slots[index] : null;
+
+    private void SaveConfig()
+    {
+        var entries = new List<PluginEntry>();
+
+        foreach (var slot in Slots.ActiveSlots())
+        {
+            var entry = EntryOf(slot);
+            entry.AutoReload = slot.AutoReload;
+            entry.ButtonText = slot.ButtonText;
+            entries.Add(entry);
+        }
+
+        _config.Save(entries);
     }
 }

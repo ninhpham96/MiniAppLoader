@@ -24,6 +24,13 @@ public sealed partial class PluginSlot : ObservableObject
     /// </summary>
     public int Index { get; init; }
 
+    /// <summary>
+    ///     Entry gốc trong <c>plugins.json</c>. Giữ những field không hiện trên UI
+    ///     (<c>commandClassName</c>, các override gỡ ribbon) để ghi lại đúng nguyên trạng.
+    ///     <see langword="null"/> khi slot đang trống.
+    /// </summary>
+    public PluginEntry? Entry { get; set; }
+
     [ObservableProperty] private string _id = string.Empty;
     [ObservableProperty] private string _dllPath = string.Empty;
     [ObservableProperty] private string _buttonText = string.Empty;

@@ -22,6 +22,7 @@
         <!-- Logging -->
         <PackageReference Include="Serilog" Version="4.3.1"/>
         <PackageReference Include="Serilog.Sinks.Debug" Version="3.0.0"/>
+        <PackageReference Include="Serilog.Sinks.File" Version="6.0.0"/>
 
         <!-- MVVM -->
         <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2"/>
@@ -34,6 +35,17 @@
         <PackageReference Include="Polyfill" Version="10.5.1" PrivateAssets="all"/>
     </ItemGroup>
     
+    <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+        <!-- .NET Framework không có System.Text.Json in-box. Package này kéo theo
+             System.Runtime.CompilerServices.Unsafe / System.Memory / System.Buffers…, mà
+             binding redirect của add-in KHÔNG có tác dụng (Revit.exe.config mới là thứ điều
+             khiển AppDomain). Nếu gặp MissingMethodException lúc chạy trên Revit ≤2024 vì
+             add-in khác nạp bản Unsafe khác: bật <IsRepackable>true</IsRepackable> ở trên —
+             Nice3point SDK sẽ ILRepack + internalize các DLL này vào MiniAppLoader.dll.
+             Revit 2025+ có sẵn System.Text.Json nên không cần gì cả. -->
+        <PackageReference Include="System.Text.Json" Version="8.0.5"/>
+    </ItemGroup>
+
     <ItemGroup>
         <!-- Đặt tên theo token light/dark ở segment cuối: SetImage/SetLargeImage của
              Nice3point.Revit.Extensions tự đổi sang bản -dark khi Revit 2024+ chuyển theme. -->
