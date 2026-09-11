@@ -14,3 +14,5 @@
 *.user
 # Shadow copy của loader (sinh ra cạnh DLL plugin lúc chạy)
 ~shadow/
+samples/*/bin/
+samples/*/obj/

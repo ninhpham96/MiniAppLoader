@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Plugin mẫu để thử loader. KHÔNG khai báo .addin và KHÔNG deploy vào thư mục
+         Addins của Revit — nó tồn tại chỉ để MiniAppLoader nạp từ thư mục bin này.
+         EnableDynamicLoading sinh ra .deps.json, thứ mà AssemblyDependencyResolver của
+         loader cần để tìm dependency riêng của plugin. -->
+    <PropertyGroup>
+        <TargetFramework>net8.0-windows</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>true</ImplicitUsings>
+        <UseWPF>true</UseWPF>
+        <EnableDynamicLoading>true</EnableDynamicLoading>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="2026.*"/>
+        <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="2026.*"/>
+    </ItemGroup>
+
+</Project>

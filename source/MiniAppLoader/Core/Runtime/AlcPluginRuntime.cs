@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 
 namespace MiniAppLoader.Core.Runtime;
@@ -33,8 +34,8 @@ internal sealed class PluginLoadContext(string pluginDllPath) : AssemblyLoadCont
             }
         }
 
-        // Ngược lại: dependency riêng của plugin -> nạp PRIVATE vào context này để nó bị
-        // gỡ cùng lúc với plugin. Nạp thẳng từ path (khoá file dependency đó) thay vì qua
+        // Ngược lại: dependency riêng của plugin -> nạp PRIVATE vào context này để nó bị gỡ
+        // cùng lúc với plugin. Nạp thẳng từ path (khoá file dependency đó) thay vì qua
         // stream: dependency NuGet hiếm khi bị rebuild lúc dev, và tránh cho nó cũng dính
         // Assembly.Location rỗng.
         var path = _resolver.ResolveAssemblyToPath(assemblyName);
@@ -56,7 +57,6 @@ internal sealed class PluginLoadContext(string pluginDllPath) : AssemblyLoadCont
 internal sealed class AlcPluginRuntime : IPluginRuntime
 {
     private readonly Dictionary<int, PluginLoadContext> _contexts = [];
-    private readonly Dictionary<int, WeakReference> _contextRefs = [];
     private readonly Dictionary<int, string> _dllPaths = [];
 
     public Assembly Load(PluginSlot slot)
@@ -67,36 +67,56 @@ internal sealed class AlcPluginRuntime : IPluginRuntime
 
         var context = new PluginLoadContext(slot.DllPath);
         _contexts[slot.Index] = context;
-        _contextRefs[slot.Index] = new WeakReference(context, trackResurrection: true);
 
         return context.LoadPlugin(slot.DllPath, slot.Index);
     }
 
     public UnloadResult Unload(int slotIndex)
     {
-        if (!_contexts.TryGetValue(slotIndex, out var context)) return UnloadResult.NothingLoaded;
+        var reference = DetachContext(slotIndex);
+        if (reference is null) return UnloadResult.NothingLoaded;
 
-        context.Unload();
-        _contexts.Remove(slotIndex);
-
-        // Unload() chỉ ĐÁNH DẤU; context thật sự biến mất sau khi GC dọn hết reference tới
-        // type/instance bên trong nó. Nếu plugin còn bị giữ (vd nó subscribe Idling mà không
-        // nhả) thì vòng lặp này không cứu được — và đó chính là thứ ta cần BIẾT, thay vì
-        // lặng lẽ chạy code cũ như bản v1.
-        var reference = _contextRefs[slotIndex];
+        // Vòng GC này PHẢI nằm ngoài method đang giữ biến cục bộ trỏ tới context — xem
+        // DetachContext. Thường 2 vòng là đủ; 10 chỉ để chắc chắn.
         for (var attempt = 0; attempt < 10 && reference.IsAlive; attempt++)
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
         }
 
-        var released = !reference.IsAlive;
-        _contextRefs.Remove(slotIndex);
-
         // ALC vừa nhả khoá -> dọn luôn bản shadow của lần nạp trước.
         if (_dllPaths.TryGetValue(slotIndex, out var dllPath)) ShadowCopy.CleanupOld(dllPath);
 
-        return released ? UnloadResult.Released : UnloadResult.StillAlive;
+        return reference.IsAlive ? UnloadResult.StillAlive : UnloadResult.Released;
+    }
+
+    /// <summary>
+    ///     Gỡ context ra khỏi dictionary, gọi <c>Unload()</c>, rồi TRẢ VỀ — cố ý tách thành
+    ///     method riêng và cấm inline.
+    ///     <para>
+    ///         <c>AssemblyLoadContext.Unload()</c> chỉ đánh dấu; context chỉ thật sự chết khi
+    ///         GC không còn thấy reference nào tới nó. Một BIẾN CỤC BỘ trỏ tới context vẫn
+    ///         được tính là reference sống cho tới hết scope của method — đặc biệt ở build
+    ///         Debug, nơi JIT không rút ngắn tuổi thọ biến. Nếu gọi <c>GC.Collect()</c> ngay
+    ///         trong method còn giữ biến đó thì không đời nào thu được, và slot sẽ báo
+    ///         "Leaked" dù plugin hoàn toàn sạch.
+    ///     </para>
+    ///     <para>
+    ///         Đây là pattern chính thức trong tài liệu .NET về assembly unloadability, và đã
+    ///         gặp đúng triệu chứng này khi test thật trên Revit 2026.
+    ///     </para>
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private WeakReference? DetachContext(int slotIndex)
+    {
+        if (!_contexts.TryGetValue(slotIndex, out var context)) return null;
+
+        _contexts.Remove(slotIndex);
+
+        var reference = new WeakReference(context, trackResurrection: true);
+        context.Unload();
+
+        return reference;
     }
 }
 #endif

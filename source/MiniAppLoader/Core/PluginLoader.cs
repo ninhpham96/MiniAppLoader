@@ -57,6 +57,12 @@ internal sealed class PluginLoader
             throw new IOException($"'{slot.DllPath}' vẫn đang bị ghi/khoá sau nhiều lần thử — bỏ qua lần reload này.");
         }
 
+        // PHẢI nhả tham chiếu tới assembly cũ TRƯỚC khi unload: một object Assembly giữ
+        // sống chính AssemblyLoadContext sinh ra nó, nên chỉ cần dictionary này còn trỏ tới
+        // bản cũ là ctx.Unload() + GC.Collect không bao giờ thu được — slot sẽ báo "Leaked"
+        // dù plugin hoàn toàn sạch. Đã gặp thật khi test trên Revit 2026.
+        _assemblies.Remove(slot.Index);
+
         var previousUnload = _runtime.Unload(slot.Index);
         var assembly = _runtime.Load(slot);
         _assemblies[slot.Index] = assembly;

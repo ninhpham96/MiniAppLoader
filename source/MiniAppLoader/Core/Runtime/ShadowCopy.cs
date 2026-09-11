@@ -48,7 +48,7 @@ internal static class ShadowCopy
         {
             File.Copy(dllPath, shadowDll, overwrite: true);
         }
-        catch (IOException) when (preferredSuffix is not null)
+        catch (Exception exception) when (preferredSuffix is not null && IsFileLocked(exception))
         {
             // Bản shadow cũ chưa được giải phóng xong -> dùng tên GUID để không kẹt.
             shadowDll = Path.Combine(shadowDirectory, Guid.NewGuid().ToString("N") + ".dll");
@@ -62,7 +62,7 @@ internal static class ShadowCopy
             {
                 File.Copy(pdbPath, Path.ChangeExtension(shadowDll, ".pdb"), overwrite: true);
             }
-            catch (IOException)
+            catch (Exception exception) when (IsFileLocked(exception))
             {
                 // Thiếu pdb chỉ mất số dòng trong stack trace, không đáng để hỏng cả lần nạp.
             }
@@ -90,18 +90,27 @@ internal static class ShadowCopy
         foreach (var file in Directory.EnumerateFiles(shadowDirectory))
         {
             if (string.Equals(file, exceptPath, StringComparison.OrdinalIgnoreCase)) continue;
-            try { File.Delete(file); } catch (IOException) { /* còn bị khoá, để lần sau */ }
+            try { File.Delete(file); } catch (Exception exception) when (IsFileLocked(exception)) { /* còn bị khoá, để lần sau */ }
         }
 
         try
         {
             if (Directory.GetFileSystemEntries(shadowDirectory).Length == 0) Directory.Delete(shadowDirectory);
         }
-        catch (IOException)
+        catch (Exception exception) when (IsFileLocked(exception))
         {
             // Còn file bị khoá bên trong, hoặc đua với một lần Create khác — bỏ qua.
         }
     }
+
+    /// <summary>
+    ///     File đang bị khoá biểu hiện thành HAI exception khác nhau trên Windows, tuỳ thao
+    ///     tác: <see cref="IOException"/> khi mở, nhưng <see cref="UnauthorizedAccessException"/>
+    ///     khi XOÁ một DLL vẫn còn được map làm assembly image. Bắt sót vế thứ hai từng khiến
+    ///     việc dọn rác (vốn best-effort) ném lỗi ra ngoài và giết cả lần reload.
+    /// </summary>
+    private static bool IsFileLocked(Exception exception)
+        => exception is IOException or UnauthorizedAccessException;
 
     /// <summary>
     ///     Chờ tới khi <paramref name="path"/> mở đọc được độc quyền.
@@ -121,11 +130,7 @@ internal static class ShadowCopy
                 using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
                 return true;
             }
-            catch (IOException)
-            {
-                Thread.Sleep(delayMilliseconds);
-            }
-            catch (UnauthorizedAccessException)
+            catch (Exception exception) when (IsFileLocked(exception))
             {
                 Thread.Sleep(delayMilliseconds);
             }

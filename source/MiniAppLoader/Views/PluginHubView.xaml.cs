@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -32,6 +33,10 @@ public partial class PluginHubView : UserControl
 
         ThemeManager.Apply(this);
 
+        // Khung nhật ký phải tự bám dòng mới nhất — log mà người dùng phải tự cuộn tay
+        // xuống mỗi lần có sự kiện thì coi như không đọc được lúc đang sửa code.
+        ((INotifyCollectionChanged)viewModel.Log).CollectionChanged += OnLogChanged;
+
         Loaded += OnLoaded;
         DragOver += OnDragOver;
         Drop += OnDrop;
@@ -42,6 +47,11 @@ public partial class PluginHubView : UserControl
     {
         _unsubscribeTheme?.Invoke();
         _unsubscribeTheme = null;
+    }
+
+    private void OnLogChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Add) LogScroll.ScrollToEnd();
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)

@@ -80,6 +80,9 @@ public sealed class ConfigStore(string revitVersion, string? legacyConfigPath = 
     private static readonly JsonSerializerOptions WriteOptions = new()
     {
         WriteIndented = true,
+        // camelCase để khớp đúng schema plugins.json của bản v1 (đọc thì đằng nào cũng
+        // case-insensitive, nhưng file ghi ra nên giống bản cũ để copy qua lại được).
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
