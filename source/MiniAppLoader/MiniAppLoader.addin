@@ -1,0 +1,14 @@
+<RevitAddIns>
+    <AddIn Type="Application">
+        <Name>MiniAppLoader</Name>
+        <Assembly>MiniAppLoader\MiniAppLoader.dll</Assembly>
+        <AddInId>D397B24E-AA6E-4645-8D3A-78FD7C800717</AddInId>
+        <FullClassName>MiniAppLoader.Application</FullClassName>
+        <VendorId>Development</VendorId>
+        <VendorDescription></VendorDescription>
+    </AddIn>
+    <ManifestSettings>
+        <UseRevitContext>False</UseRevitContext>
+        <ContextName>MiniAppLoader</ContextName>
+    </ManifestSettings>
+</RevitAddIns>
