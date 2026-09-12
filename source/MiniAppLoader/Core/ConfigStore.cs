@@ -23,6 +23,13 @@ public sealed class PluginEntry
     public string? ButtonText { get; set; }
 
     /// <summary>
+    ///     Icon cho nút trên panel "Plugins". Tuỳ chọn — bỏ trống thì loader tự tìm file
+    ///     <c>&lt;tên-dll&gt;.png</c> cạnh DLL, rồi tự sinh icon (vòng tròn màu + chữ cái đầu)
+    ///     nếu vẫn không có gì. Đường dẫn tương đối tính theo thư mục chứa DLL.
+    /// </summary>
+    public string? IconPath { get; set; }
+
+    /// <summary>
     ///     Chỉ cần khi một DLL có NHIỀU class implement entry point và bạn muốn chỉ rõ class
     ///     nào. Bỏ trống thì lấy class đầu tiên tìm thấy qua reflection.
     /// </summary>

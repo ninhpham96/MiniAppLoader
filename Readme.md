@@ -76,7 +76,24 @@ bản cũ, vì bộ cài per-machine đặt add-in vào `Program Files` (user th
 | `kind` | `Command` (mặc định) — DLL có class `IExternalCommand`, chạy bằng nút ribbon.<br>`Application` — DLL có class `IExternalApplication` tự dựng ribbon riêng; loader gọi `OnStartup` ngay khi Revit mở, KHÔNG chiếm slot nút nào. |
 | `autoReload` | Theo dõi file DLL, tự nạp lại khi build xong |
 | `commandClassName` | Chỉ cần khi DLL có nhiều class entry point và bạn muốn chỉ rõ |
+| `iconPath` | Icon cho nút trên panel "Plugins". Tuỳ chọn — xem mục **Icon nút ribbon** bên dưới |
 | `ribbonTabsToRemove`, `ribbonPanelsToRemove` | Override thủ công cho `kind: Application`. Bình thường **để trống** — loader tự phát hiện (xem bên dưới) |
+
+### Icon nút ribbon
+
+Ba lớp ưu tiên, để nút không bao giờ trống trơn như mặc định của Revit:
+
+1. **`iconPath` khai trong `plugins.json`** — đường dẫn tới file `.png`. Tương đối thì tính
+   theo thư mục chứa DLL.
+2. **Convention, không cần sửa config:** đặt file `<TênDLL>.png` CẠNH file DLL (ví dụ
+   `MyPlugin.dll` → `MyPlugin.png` cùng thư mục output) — build ra là có icon ngay. Dùng
+   `<None Include="icon.png"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>`
+   trong `.csproj` của plugin để icon luôn theo DLL mỗi lần build.
+3. **Tự sinh** khi không có gì ở trên: vòng tròn màu + chữ cái đầu (theo `buttonText`, hoặc
+   `id` nếu không đặt). Màu suy ra ổn định từ `id` (không đổi giữa các lần mở Revit).
+
+Icon gán lúc **thêm plugin** (`+ Thêm` hoặc nạp từ config lúc khởi động), không đổi lại khi
+reload — sửa `iconPath` hoặc icon convention thì cần gỡ rồi thêm lại plugin đó.
 
 Hai lưu ý khi sửa tay:
 
@@ -141,6 +158,7 @@ Chạy thật qua [rvt-mcp](https://github.com/bimwright/rvt-mcp), không dừng
 | `IHotCommand` — tự chạy lại sau build, không chạm chuột | — | ✅ (2 vòng, ~540 ms sau khi build xong) |
 | Kéo-thả DLL từ Explorer vào pane | — | ✅ (kể cả nhánh từ chối DLL không có entry point) |
 | `ribbonPanelsToRemove` gỡ được panel diff không thấy | — | ✅ (sau khi sửa lỗi, xem dưới) |
+| Icon nút ribbon: convention + tự sinh | — | ✅ (kiểm màu ổn định qua 3 tiến trình riêng biệt) |
 
 ### Nhánh lỗi (Revit 2026)
 

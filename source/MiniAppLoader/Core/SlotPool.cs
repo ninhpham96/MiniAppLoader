@@ -86,7 +86,7 @@ public sealed class SlotPool
     /// <summary>Các plugin đang thực sự hoạt động (slot đã gán) theo thứ tự slot.</summary>
     public IEnumerable<PluginSlot> ActiveSlots() => _slots.Where(slot => !slot.IsFree);
 
-    /// <summary>Hiện nút của slot và đặt lại nhãn theo tên plugin.</summary>
+    /// <summary>Hiện nút của slot, đặt lại nhãn theo tên plugin và gán icon.</summary>
     public void ShowButton(PluginSlot slot)
     {
         var button = _buttons[slot.Index];
@@ -96,6 +96,13 @@ public sealed class SlotPool
         button.ItemText = string.IsNullOrWhiteSpace(slot.ButtonText) ? slot.Id : slot.ButtonText;
         button.ToolTip = slot.DllPath;
         button.Visible = true;
+
+        if (slot.Entry is { } entry)
+        {
+            var (small, large) = PluginIcon.Resolve(entry);
+            button.Image = small;
+            button.LargeImage = large;
+        }
     }
 
     /// <summary>Ẩn nút khi plugin bị gỡ. Nút được giữ lại để cấp cho plugin sau.</summary>
@@ -106,6 +113,8 @@ public sealed class SlotPool
 
         button.Visible = false;
         button.ItemText = $"Slot {slot.Index:D2}";
+        button.Image = null;
+        button.LargeImage = null;
     }
 
     /// <summary>
