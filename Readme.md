@@ -11,23 +11,116 @@ Hỗ trợ **Revit 2022 → 2027** (net48 / net8.0-windows / net10.0-windows).
 
 ---
 
-## Cài đặt
+## Bắt đầu
 
-**Dùng bộ cài:** tải MSI ở phần Releases rồi chạy — chọn đúng các version Revit bạn cần.
-Có hai bản: `SingleUser` (cài cho riêng bạn, không cần quyền admin) và `MultiUser`.
+### Yêu cầu
 
-**Build từ source:**
+| | |
+|---|---|
+| Windows | 10/11 |
+| .NET SDK | Bản pin trong [`global.json`](global.json) (hiện `10.0.x`) — `dotnet --list-sdks` để kiểm; cài SDK 10 mới nhất từ [dotnet.microsoft.com](https://dotnet.microsoft.com/download) nếu chưa có |
+| Revit | **Chỉ cần để CHẠY**, không cần để build — `Nice3point.Revit.Api.*` kéo RevitAPI qua NuGet. Cài bản nào thì build đúng cấu hình đó (bảng bên dưới) |
+| Git | để clone repo |
+
+Không cần cài `wix` tool tay — bước đóng gói MSI (mục **Phát triển**) tự cài nó.
+
+### Cách 1 — Dùng bộ cài (không sửa code)
+
+Tải MSI ở phần Releases rồi chạy — chọn đúng các version Revit bạn cần. Có hai bản:
+`SingleUser` (cài cho riêng bạn, không cần quyền admin) và `MultiUser` (cần quyền admin, cho
+mọi user trên máy). Bỏ qua phần "Cách 2" bên dưới, sang thẳng mục **Dùng**.
+
+### Cách 2 — Build từ source (để phát triển)
 
 ```bash
+git clone <repo-url> MiniAppLoader
+cd MiniAppLoader
 dotnet build source/MiniAppLoader -c Debug.R26
 ```
 
-`.addin` được Nice3point SDK tự deploy vào `%AppData%\Autodesk\Revit\Addins\<version>\` sau
-mỗi lần build — không cần copy tay. Đổi `R26` thành `R22`…`R27` cho version khác. **Không
-cần cài Revit để build** (RevitAPI kéo qua NuGet), chỉ cần để chạy.
+Đổi `R26` thành đúng version Revit bạn có, theo bảng:
 
-Lần đầu mở Revit sẽ có hộp thoại *"Security - Unsigned Add-In"* vì add-in chưa ký số —
-chọn **Always Load** (hoặc **Load Once** nếu chỉ muốn thử).
+| Cấu hình | Revit | TFM |
+|---|---|---|
+| `R22`, `R23`, `R24` | 2022 – 2024 | `net48` |
+| `R25`, `R26` | 2025 – 2026 | `net8.0-windows` |
+| `R27` | 2027 | `net10.0-windows` |
+
+Ba việc xảy ra tự động, không cần thao tác tay:
+
+1. **Deploy** — `MiniAppLoader.dll` + `.addin` được Nice3point SDK copy vào
+   `%AppData%\Autodesk\Revit\Addins\<năm>\`.
+2. **Tự mở Revit** — `LaunchRevit=true` trong `.csproj`, nên build xong Revit đúng năm đó tự
+   khởi động (nếu chưa chạy). Không cần tự bấm mở Revit lần đầu.
+3. Lần đầu mở, Revit hiện hộp thoại **"Security - Unsigned Add-In"** vì add-in chưa ký số —
+   chọn **Always Load** (tin cậy vĩnh viễn, không hỏi lại) hoặc **Load Once** (chỉ lần này).
+
+**Quan trọng khi sửa code loader (không phải plugin):** Revit khoá file DLL trong lúc chạy,
+nên `dotnet build` sẽ báo lỗi *"process cannot access the file"* nếu Revit đang mở phiên
+dùng đúng add-in đó. Đóng Revit rồi build lại. Đây **chỉ** áp dụng cho chính
+`MiniAppLoader.dll` — plugin do nó quản lý thì hot-reload được ngay cả khi Revit đang chạy,
+đó chính là lý do dự án này tồn tại.
+
+### Viết plugin đầu tiên
+
+Plugin là một class library bình thường, build ra một DLL — không cần `.addin`, không cần
+deploy vào thư mục Addins của Revit.
+
+**1. Tạo project**, tham chiếu đúng RevitAPI theo Revit bạn dùng:
+
+```bash
+dotnet new classlib -n MyPlugin -o MyPlugin
+cd MyPlugin
+dotnet add package Nice3point.Revit.Api.RevitAPI --version 2026.*
+dotnet add package Nice3point.Revit.Api.RevitAPIUI --version 2026.*
+```
+
+Sửa `MyPlugin.csproj`, thêm đúng 2 dòng này vào `<PropertyGroup>` (thiếu
+`EnableDynamicLoading` thì loader không dò được dependency riêng của plugin):
+
+```xml
+<TargetFramework>net8.0-windows</TargetFramework>
+<EnableDynamicLoading>true</EnableDynamicLoading>
+```
+
+**2. Viết lệnh** (`Command.cs`):
+
+```csharp
+using Autodesk.Revit.Attributes;
+using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
+
+[Transaction(TransactionMode.Manual)]
+public class Command : IExternalCommand
+{
+    public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
+    {
+        TaskDialog.Show("MyPlugin", "Xin chào từ MyPlugin!");
+        return Result.Succeeded;
+    }
+}
+```
+
+**3. Build**: `dotnet build -c Debug`.
+
+**4. Nạp vào MiniAppLoader** — mở Revit (add-in đã chạy sẵn), bấm tab **MiniApps → Plugin
+Hub**, rồi **+ Thêm** và chọn `bin\Debug\net8.0-windows\MyPlugin.dll` — hoặc kéo thả thẳng
+file đó vào pane. Xong ngay: nút xuất hiện trên panel **Plugins**, bấm **Chạy** để thử.
+
+**5. Sửa code, build lại, thấy ngay** — sửa dòng `TaskDialog.Show`, `dotnet build` lại,
+Revit tự phát hiện DLL đổi và nạp lại trong khi vẫn đang mở (mặc định `autoReload: true`).
+Đây là toàn bộ vòng lặp dev mà công cụ này tồn tại để phục vụ.
+
+Muốn ví dụ đầy đủ hơn (dependency riêng, multi-target net48+net8, ghi log thay vì dialog để
+tự động test được) thì xem [`samples/SamplePlugin`](samples/SamplePlugin) — copy nguyên
+thư mục đó làm điểm bắt đầu cũng được.
+
+Muốn nút có **icon riêng** thay vì vòng tròn tự sinh: xem mục **Icon nút ribbon** trong phần
+[`plugins.json`](#pluginsjson) bên dưới. Muốn plugin **tự chạy lại** ngay sau mỗi lần build
+mà không cần bấm Chạy: implement thêm `MiniAppLoader.Core.IHotCommand`, xem
+[`samples/SampleHotCommand`](samples/SampleHotCommand). Muốn plugin **tự dựng ribbon riêng**
+(`kind: Application`) thay vì dùng nút có sẵn: xem mục **Cơ chế** bên dưới và
+[`samples/SampleApplication`](samples/SampleApplication).
 
 ---
 
