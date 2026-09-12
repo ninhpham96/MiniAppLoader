@@ -15,6 +15,7 @@
         <views:StatusBrushConverter x:Key="StatusBrush"/>
         <views:InverseBoolToVisibilityConverter x:Key="EmptyState"/>
         <views:PositiveToVisibilityConverter x:Key="WhenPositive"/>
+        <views:CommandKindToVisibilityConverter x:Key="WhenCommandKind"/>
 
         <!-- Nút phẳng, chỉ nổi khối khi hover - giữ cho pane yên tĩnh lúc không thao tác. -->
         <Style x:Key="FlatButton" TargetType="Button">
@@ -189,12 +190,19 @@
 
                                         <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"
                                                     Orientation="Horizontal" Margin="0,4,0,0">
+                                            <!-- Plugin kiểu Application không có IExternalCommand nào để chạy:
+                                                 nó tự dựng ribbon riêng trong OnStartup. Hiện nút Chạy ở đây là mời
+                                                 người dùng bấm vào một thứ chắc chắn báo lỗi. -->
                                             <Button Style="{StaticResource FlatButton}" FontSize="11"
                                                     Content="Chạy"
                                                     IsEnabled="{Binding DataContext.CanRunFromHub, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                     ToolTip="{Binding DataContext.RunUnavailableReason, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                     Command="{Binding DataContext.RunCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                    CommandParameter="{Binding}"/>
+                                                    CommandParameter="{Binding}">
+                                                <Button.Visibility>
+                                                    <Binding Path="Kind" Converter="{StaticResource WhenCommandKind}"/>
+                                                </Button.Visibility>
+                                            </Button>
                                             <Button Style="{StaticResource FlatButton}" FontSize="11" Margin="2,0,0,0"
                                                     Content="Nạp lại"
                                                     Command="{Binding DataContext.ReloadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"

@@ -55,7 +55,7 @@ public class Application : ExternalApplication
     public override void OnShutdown()
     {
         _hubView?.Teardown();
-        PluginHost.Shutdown(Application);
+        PluginHost.Shutdown();
         Log.CloseAndFlush();
     }
 

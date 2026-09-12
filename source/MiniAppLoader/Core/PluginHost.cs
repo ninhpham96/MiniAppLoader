@@ -33,6 +33,18 @@ public sealed class PluginHost
     private static PluginHost? _current;
 
     private readonly ConfigStore _config;
+
+    /// <summary>
+    ///     Chặn ghi config trong lúc ĐANG đọc config.
+    ///     <para>
+    ///         <see cref="Bind"/> gán <c>slot.AutoReload</c>, việc đó bắn PropertyChanged, và
+    ///         Plugin Hub hiểu nhầm đó là người dùng vừa tick vào ô "auto" nên gọi
+    ///         <see cref="SetAutoReload"/> — tức là GHI ĐÈ plugins.json ngay giữa lúc đang đọc
+    ///         nó. Hậu quả thật đã gặp: sửa tay file config rồi mở Revit thì thấy file bị viết
+    ///         lại theo định dạng của loader.
+    ///     </para>
+    /// </summary>
+    private bool _loadingConfig;
     private readonly PluginLoader _loader = new();
     private readonly ReloadPipeline _pipeline;
 
@@ -55,7 +67,7 @@ public sealed class PluginHost
     internal static void Initialize(string revitVersion, string? legacyConfigPath)
         => _current = new PluginHost(new ConfigStore(revitVersion, legacyConfigPath));
 
-    internal static void Shutdown(UIControlledApplication application)
+    internal static void Shutdown()
     {
         if (_current is null) return;
 
@@ -79,6 +91,19 @@ public sealed class PluginHost
     ///     </para>
     /// </summary>
     internal void LoadFromConfig(UIControlledApplication application)
+    {
+        _loadingConfig = true;
+        try
+        {
+            LoadFromConfigCore(application);
+        }
+        finally
+        {
+            _loadingConfig = false;
+        }
+    }
+
+    private void LoadFromConfigCore(UIControlledApplication application)
     {
         var entries = _config.Load();
 
@@ -267,6 +292,8 @@ public sealed class PluginHost
     /// <summary>Bật/tắt tự động nạp lại cho một plugin.</summary>
     public void SetAutoReload(PluginSlot slot, bool enabled)
     {
+        if (_loadingConfig) return;
+
         if (enabled) _pipeline.Watch(slot);
         else _pipeline.Unwatch(slot.Index);
 

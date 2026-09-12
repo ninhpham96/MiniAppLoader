@@ -1,316 +1,220 @@
 # MiniAppLoader
 
-Autodesk Revit plugin project organized into multiple solution files that target versions 2023 - 2027.
+Nạp và **hot-reload plugin Revit trong lúc Revit đang chạy** — sửa code, build, bấm nút,
+thấy kết quả ngay, không restart Revit.
 
-## Table of content
+Viết lại từ [ninhpham96/AutoLoadAddin](https://github.com/ninhpham96/AutoLoadAddin) trên
+scaffold [Nice3point.Revit.Templates](https://github.com/Nice3point/RevitTemplates) đầy đủ:
+giữ nguyên năng lực loader, thay UI bằng **dockable pane**, và bổ sung bộ cài MSI.
 
-<!-- TOC -->
-* [Prerequisites](#prerequisites)
-* [Solution Structure](#solution-structure)
-* [Project Structure](#project-structure)
-* [Building](#building)
-  * [Building the MSI installer on local machine](#building-the-msi-installer-on-local-machine)
-* [Publishing Releases](#publishing-releases)
-  * [Creating a new Release from the JetBrains Rider](#creating-a-new-release-from-the-jetbrains-rider)
-  * [Creating a new Release from the Terminal](#creating-a-new-release-from-the-terminal)
-  * [Creating a new Release on GitHub](#creating-a-new-release-on-github)
-* [Compiling a solution on GitHub](#compiling-a-solution-on-github)
-* [Conditional compilation for a specific Revit version](#conditional-compilation-for-a-specific-revit-version)
-* [Managing Supported Revit Versions](#managing-supported-revit-versions)
-  * [Solution configurations](#solution-configurations)
-  * [Project configurations](#project-configurations)
-* [API references](#api-references)
-* [Learn More](#learn-more)
-<!-- TOC -->
+Hỗ trợ **Revit 2022 → 2027** (net48 / net8.0-windows / net10.0-windows).
 
-## Prerequisites
+---
 
-Before you can build this project, you need to install .NET and IDE.
-If you haven't already installed these, you can do so by visiting the following:
+## Cài đặt
 
-- [.NET Framework 4.8](https://dotnet.microsoft.com/download/dotnet-framework/net48)
-- [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet)
-- [JetBrains Rider](https://www.jetbrains.com/rider/) or [Visual Studio](https://visualstudio.microsoft.com/)
+**Dùng bộ cài:** tải MSI ở phần Releases rồi chạy — chọn đúng các version Revit bạn cần.
+Có hai bản: `SingleUser` (cài cho riêng bạn, không cần quyền admin) và `MultiUser`.
 
-## Solution Structure
+**Build từ source:**
 
-| Folder  | Description                                                                |
-|---------|----------------------------------------------------------------------------|
-| build   | ModularPipelines build system. Used to automate project builds             |
-| install | Add-in installer, called implicitly by the ModularPipelines build          |
-| source  | Project source code folder. Contains all solution projects                 |
-| output  | Folder of generated files by the build system, such as bundles, installers |
-
-## Project Structure
-
-| Folder     | Description                                                                                                                                                                                          |
-|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Commands   | External commands invoked from the Revit ribbon. Registered in the `Application` class                                                                                                               |
-| Models     | Classes that encapsulate the app's data, include data transfer objects (DTOs). More [details](https://learn.microsoft.com/en-us/dotnet/architecture/maui/mvvm).                                      |
-| ViewModels | Classes that implement properties and commands to which the view can bind data. More [details](https://learn.microsoft.com/en-us/dotnet/architecture/maui/mvvm).                                     |
-| Views      | Classes that are responsible for defining the structure, layout and appearance of what the user sees on the screen. More [details](https://learn.microsoft.com/en-us/dotnet/architecture/maui/mvvm). |
-| Resources  | Images, sounds, localisation files, etc.                                                                                                                                                             |
-| Utils      | Utilities, extensions, helpers used across the application                                                                                                                                           |
-
-## Building
-
-We recommend JetBrains Rider as preferred IDE, since it has outstanding .NET support. If you don't have Rider installed, you can download it
-from [here](https://www.jetbrains.com/rider/).
-
-1. Open JetBrains Rider
-2. In the `Solutions Configuration` drop-down menu, select `Release.R27` or `Debug.R27`. Suffix `R27` means compiling for the Revit 2027.
-3. After the solution loads, you can build it by clicking on `Build -> Build Solution`.
-4. `Debug` button will start Revit add-in in the debug mode.
-
-   ![image](https://github.com/user-attachments/assets/d209d863-a6d5-43a9-83e1-5eeb2b9fddac)
-
-Also, you can use Visual Studio. If you don't have Visual Studio installed, download it from [here](https://visualstudio.microsoft.com/downloads/).
-
-1. Open Visual Studio
-2. In the `Solutions Configuration` drop-down menu, select `Release.R27` or `Debug.R27`. Suffix `R27` means compiling for the Revit 2027.
-3. After the solution loads, you can build it by clicking on `Build -> Build Solution`.
-
-### Building the MSI installer on local machine
-
-To build the project for all versions, create the installer, this project uses [ModularPipelines](https://github.com/thomhurst/ModularPipelines)
-
-To execute your ModularPipelines build locally, you can follow these steps:
-
-1. **Navigate to your project directory**. Open a terminal / command prompt and navigate to your project's root directory.
-2. **Run the build**. Once you have navigated to your project's root directory, you can run the ModularPipelines build by calling:
-
-   Compile:
-   ```shell
-   cd build; dotnet run
-   ```
-
-   Create installer:
-   ```shell
-   cd build; dotnet run -- pack
-   ```
-
-   This command will execute the ModularPipelines build defined in your project.
-
-## Publishing Releases
-
-Releases are managed by creating new [Git tags](https://git-scm.com/book/en/v2/Git-Basics-Tagging).
-A tag in Git used to capture a snapshot of the project at a particular point in time, with the ability to roll back to a previous version.
-
-The build system uses [GitVersion.Tool](https://gitversion.net/docs/) to automatically determine the Release version based on the Git history and tags. 
-If a tag is present on the current commit, the version will match the tag. If no tag is specified, the tool automatically generates a release version based on the branch name and commit history.
-
-You can also specify a fixed version by setting the `Version` property in the `build/appsettings.json` file. This will override the version determined by GitVersion.Tool.
-
-Tags can follow the format `version` or `version-stage.n.date` for pre-releases, where:
-
-- **version** specifies the version of the release:
-    - `1.0.0`
-    - `2.3.0`
-- **stage** specifies the release stage:
-    - `alpha` - represents early iterations that may be unstable or incomplete.
-    - `beta` - represents a feature-complete version but may still contain some bugs.
-- **n** prerelease increment (optional):
-    - `1` - first alpha prerelease
-    - `2` - second alpha prerelease
-- **date** specifies the date of the pre-release (optional):
-    - `250101`
-    - `20250101`
-
-For example:
-
-| Stage   | Version                |
-|---------|------------------------|
-| Alpha   | 1.0.0-alpha            |
-| Alpha   | 1.0.0-alpha.1.20250101 |
-| Beta    | 1.0.0-beta.2.20250101  |
-| Release | 1.0.0                  |
-
-### Updating the Changelog
-
-Updating the changelog is optional. If you provide a changelog, the build system will use it for the release notes. 
-If no entry is found for the current version, GitHub will automatically generate release notes based on your pull requests and commits.
-
-To update the changelog manually:
-
-1. Navigate to the solution root.
-2. Open the file **Changelog.md**.
-3. Add a section for your version. The version separator is the `#` symbol.
-4. Specify the release number e.g. `# 1.0.0` or `# 25.01.01 v1.0.0`, the format does not matter, the main thing is that it contains the version.
-5. In the lines below, write a changelog for your version, style to your taste.
-6. Commit your changes.
-
-### Creating a new Release from the JetBrains Rider
-
-JetBrains provides a handy UI for creating a tag, it can be created in a few steps:
-
-1. Open JetBrains Rider.
-2. Navigate to the **Git** tab.
-3. Click **New Tag...** and create a new tag.
-
-   ![image](https://github.com/user-attachments/assets/19c11322-9f95-45e5-8fe6-defa36af59c4)
-
-4. Navigate to the **Git** panel.
-5. Expand the **Tags** section.
-6. Right-click on the newly created tag and select **Push to origin**.
-
-   ![image](https://github.com/user-attachments/assets/b2349264-dd76-4c21-b596-93110f1f16cb)
-
-   This process will trigger the Release workflow and create a new Release on GitHub.
-
-### Creating a new Release from the Terminal
-
-Alternatively, you can create and push tags using the terminal:
-
-1. Navigate to the repository root and open the terminal.
-2. Use the following command to create a new tag:
-   ```shell
-   git tag 'version'
-   ```
-
-   Replace `version` with the desired version, e.g., `1.0.0`.
-3. Push the newly created tag to the remote repository using the following command:
-   ```shell
-   git push origin 'version'
-   ```
-
-> [!NOTE]  
-> The tag will reference your current commit, so verify you're on the correct branch and have fetched latest changes from remote first.
-
-### Creating a new Release on GitHub
-
-To create releases directly on GitHub:
-
-1. Navigate to the **Actions** section on the repository page.
-2. Select **Publish Release** workflow.
-3. Click **Run workflow** button.
-4. (Optional) Specify the release version. If not specified, the system will automatically determine the version based on your Git history.
-5. Click **Run**.
-
-    ![image](https://github.com/user-attachments/assets/088388c1-6055-4d21-8d22-70f047d8f104)
-
-## Compiling a solution on GitHub
-
-Pushing commits to the remote repository will start a pipeline compiling the solution for all specified Revit versions. 
-That way, you can check if the plugin is compatible with different API versions without having to spend time building it locally.
-
-## Conditional compilation for a specific Revit version
-
-To write code compatible with different Revit versions, use the directives **#if**, **#elif**, **#else**, **#endif**.
-
-```c#
-#if REVIT2027
-    //Your code here
-#endif
+```bash
+dotnet build source/MiniAppLoader -c Debug.R26
 ```
 
-To target a specific Revit version, set the solution configuration in your IDE interface to match that version.
-E.g., select the `Debug.R27` configuration for the Revit 2027 API.
+`.addin` được Nice3point SDK tự deploy vào `%AppData%\Autodesk\Revit\Addins\<version>\` sau
+mỗi lần build — không cần copy tay. Đổi `R26` thành `R22`…`R27` cho version khác. **Không
+cần cài Revit để build** (RevitAPI kéo qua NuGet), chỉ cần để chạy.
 
-The project has available constants such as `REVIT2027`, `REVIT2027_OR_GREATER`. 
-Create conditions, experiment to achieve the desired result.
+Lần đầu mở Revit sẽ có hộp thoại *"Security - Unsigned Add-In"* vì add-in chưa ký số —
+chọn **Always Load** (hoặc **Load Once** nếu chỉ muốn thử).
 
-> [!NOTE]  
-> For generating directives, a Revit MSBuild SDK is used.
-> You can find more detailed documentation about it here: [Revit MSBuild SDK](https://github.com/Nice3point/Revit.Build.Tasks)
+---
 
-To support the latest APIs in legacy Revit versions:
+## Dùng
 
-```c#
-#if REVIT2021_OR_GREATER
-    UnitUtils.ConvertFromInternalUnits(69, UnitTypeId.Millimeters);
-#else
-    UnitUtils.ConvertFromInternalUnits(69, DisplayUnitType.DUT_MILLIMETERS);
-#endif
+Ribbon có tab riêng **MiniApps** với 2 panel:
+
+| Panel | Nội dung |
+|---|---|
+| `Hub` | Nút **Plugin Hub** — bật/tắt bảng quản lý |
+| `Plugins` | Nút của từng plugin, tạo sẵn 16 slot và ẩn đi; thêm plugin là hiện một nút |
+
+Bảng **Plugin Hub** (dockable pane, neo được như Properties/Project Browser):
+
+- **+ Thêm** hoặc kéo thả thẳng file `.dll` vào pane
+- Mỗi plugin là một card: chấm trạng thái, đường dẫn DLL, và **Chạy / Nạp lại / auto / Gỡ**
+- Khung **Nhật ký** ở dưới hiện mọi sự kiện nạp/lỗi (thay cho kiểu bắn `TaskDialog` của bản cũ)
+- Palette tự bám theme sáng/tối của Revit 2024+
+
+Gỡ plugin thì nút biến mất **ngay**, slot được tái sử dụng cho plugin sau.
+
+---
+
+## `plugins.json`
+
+Nằm ở `%AppData%\MiniAppLoader\<RevitVersion>\plugins.json` — **không** phải cạnh DLL như
+bản cũ, vì bộ cài per-machine đặt add-in vào `Program Files` (user thường không ghi được ở
+đó), và plugin net48 không dùng chung được với Revit 2026.
+
+```json
+{
+  "plugins": [
+    {
+      "id": "MyPlugin",
+      "dllPath": "D:/dev/MyPlugin/bin/Debug/net8.0-windows/MyPlugin.dll",
+      "buttonText": "My Plugin",
+      "autoReload": true,
+      "kind": "Command"
+    }
+  ]
+}
 ```
 
-`#if REVIT2021_OR_GREATER` сompiles a block of code for Revit versions 21, 22, 23 and greater.
+| Trường | Ý nghĩa |
+|---|---|
+| `kind` | `Command` (mặc định) — DLL có class `IExternalCommand`, chạy bằng nút ribbon.<br>`Application` — DLL có class `IExternalApplication` tự dựng ribbon riêng; loader gọi `OnStartup` ngay khi Revit mở, KHÔNG chiếm slot nút nào. |
+| `autoReload` | Theo dõi file DLL, tự nạp lại khi build xong |
+| `commandClassName` | Chỉ cần khi DLL có nhiều class entry point và bạn muốn chỉ rõ |
+| `ribbonTabsToRemove`, `ribbonPanelsToRemove` | Override thủ công cho `kind: Application`. Bình thường **để trống** — loader tự phát hiện (xem bên dưới) |
 
-To support removed APIs in newer versions of Revit, you can invert the constant:
+Hai lưu ý khi sửa tay:
 
-```c#
-#if !REVIT2023_OR_GREATER
-    var builtinCategory = (BuiltInCategory) category.Id.IntegerValue;
-#endif
+- Đường dẫn Windows trong JSON phải **nhân đôi backslash** (`"D:\\dev\\..."`) hoặc dùng dấu
+  `/`. Sai cú pháp thì Hub để trống và khung nhật ký nói rõ sai ở dòng nào.
+- **Đóng Revit trước khi sửa tay.** Hub sở hữu file này lúc đang chạy và sẽ ghi đè khi bạn
+  thêm/gỡ plugin.
+
+---
+
+## Cơ chế
+
+### Hai runtime
+
+| | Revit 2022–2024 (net48) | Revit 2025+ (net8/net10) |
+|---|---|---|
+| Nạp | `Assembly.LoadFile` từ bản shadow | `AssemblyLoadContext` collectible, **một context cho mỗi plugin** |
+| Gỡ | Không gỡ được (giới hạn nền tảng) | Gỡ thật, GC thu hồi |
+| Dependency riêng | `AppDomain.AssemblyResolve` dò thư mục plugin | `AssemblyDependencyResolver` đọc `.deps.json` |
+
+**Shadow copy.** DLL được copy sang `~shadow\` cạnh bản gốc rồi mới nạp, nên bản gốc không bị
+khoá và build đè thoải mái. Nạp thẳng từ `byte[]` cũng không khoá file, nhưng khiến
+`Assembly.Location` trả về **chuỗi rỗng** — rất nhiều plugin dùng `Location` để tự tìm thư mục
+của mình và sẽ ném ngay trong `OnStartup`. Đánh đổi: `Location` trỏ vào `~shadow\`, không phải
+thư mục output thật, nên đừng dùng `Location` để tìm resource nằm cạnh DLL.
+
+**Theo dõi file.** `FileSystemWatcher` chỉ ghi slot vào một tập "bẩn" rồi raise **một**
+`ExternalEvent` duy nhất. Cần vậy vì `ExternalEvent.Raise()` có tính gộp: build hai plugin
+trong cùng một lần MSBuild mà mỗi slot một handler thì một lần reload sẽ bị nuốt mất.
+
+**Gỡ ribbon của `kind: Application`.** Loader chụp ảnh ribbon ngay trước và ngay sau
+`OnStartup` của plugin, rồi khi reload chỉ gỡ đúng phần chênh lệch. Khai báo tay như bản cũ
+chắc chắn lệch sau vài lần plugin đổi ribbon, và ghi nhầm tên một panel dùng chung là xoá mất
+UI của add-in khác.
+
+**Chạy plugin từ Hub.** Nút *Chạy* dùng `PostCommand` với ID ribbon nội bộ, tức là đi qua
+đúng pipeline command của Revit — y hệt bạn bấm chuột. Không thể dựng `ExternalCommandData`
+giả, và tuyệt đối không được giữ lại một cái cũ để dùng lại.
+
+---
+
+## Đã kiểm chứng ở đâu
+
+Chạy thật qua [rvt-mcp](https://github.com/bimwright/rvt-mcp), không dừng ở "build sạch".
+
+| | Revit 2024 (net48) | Revit 2026 (net8) |
+|---|---|---|
+| 4 giai đoạn khởi động | ✅ | ✅ |
+| Dockable pane | ✅ | ✅ |
+| 16 nút tạo sẵn + ẩn/hiện | ✅ | ✅ |
+| `PostCommand` tra được ID ribbon | ✅ | ✅ |
+| `kind: Command` — chạy + hot reload | ✅ | ✅ |
+| `kind: Application` — `OnShutdown` → gỡ ribbon → `OnStartup` | ✅ | ✅ (4 vòng liên tiếp) |
+| Ribbon của add-in khác còn nguyên sau reload | ✅ | ✅ |
+| Thêm / gỡ / tái dùng slot | — | ✅ |
+| Dependency riêng của plugin | ✅ (xem giới hạn) | ✅ |
+
+Build sạch, 0 warning, trên cả 6 configuration `R22`…`R27`.
+
+Revit 2023, 2025, 2027 chỉ build qua NuGet — chưa chạy thử vì máy phát triển không cài.
+
+---
+
+## Giới hạn đã đo
+
+Những điều dưới đây là **kết quả đo thật**, không phải phỏng đoán.
+
+**1. Plugin `kind: Application` rò rỉ một assembly mỗi lần reload.**
+Trên Revit 2026, ALC của plugin loại này không bao giờ được thu hồi, kể cả sau full GC. Đã
+tách nguyên nhân bằng thí nghiệm: cho plugin **không dựng ribbon nào** thì vẫn y hệt, nên
+không phải do ribbon nó để lại. `kind: Command` thì thu hồi sạch. Hệ quả thực tế: reload vài
+chục lần trong một phiên dev thì không sao; rất nhiều thì restart Revit. Hub hiện số này dưới
+dạng "N bản cũ chưa thu hồi" — **chỉ là bộ nhớ**, code chạy luôn là bản mới nhất.
+
+**2. Trên net48, plugin không dùng được phiên bản thư viện của riêng nó.**
+Nếu Revit đã nạp một assembly cùng tên (ví dụ `Newtonsoft.Json`, Revit có ship sẵn), CLR sẽ
+lấy bản đó và **không bao giờ gọi tới** `AssemblyResolve` của loader. Đây là cách một-AppDomain
+hoạt động, loader không can thiệp được. Trên .NET 8 thì không bị: mỗi plugin nạp private đúng
+bản nó build cùng.
+
+**3. Trên net48, chỉ DLL chính được hot-reload thật sự.**
+Các project con mà plugin tham chiếu (`Foo.Model`, `Foo.View`…) được CLR phân giải qua tham
+chiếu tĩnh và sẽ **tái sử dụng bản đã nạp** nếu trùng tên + trùng `AssemblyVersion`. Sửa code
+trong project con sẽ không có tác dụng cho tới khi restart Revit. Cách thực tế nhất khi dev là
+gộp tạm code đang sửa vào DLL chính, hoặc chuyển sang Revit 2025+.
+
+**4. Vài đăng ký của Revit không huỷ được.**
+`FailureDefinition.CreateFailureDefinition` với GUID cố định là ví dụ điển hình: gọi lần hai
+trong cùng một tiến trình là Revit ném. Nếu plugin không tự bọc `try/catch` quanh đó thì
+reload sẽ báo lỗi. Không có cách chung nào xử lý.
+
+**5. Gỡ ribbon dựa trên API nội bộ của Autodesk.**
+`RemovePanel()` (Nice3point.Revit.Extensions) dùng `UnsafeAccessor` trên .NET 8 và reflection
+trên net48. Autodesk không cam kết ổn định. Mọi thao tác đều bọc `try/catch`: hỏng thì ribbon
+cũ còn sót lại, chứ add-in không chết.
+
+---
+
+## Khác gì bản cũ
+
+| Bản cũ | Bản này |
+|---|---|
+| Tối đa 8 plugin, nút gỡ rồi vẫn nằm lại tới khi restart Revit | 16 slot, nút ẩn ngay và slot tái sử dụng được |
+| Dialog gỡ plugin viết bằng WinForms | Dockable pane WPF + MVVM |
+| Mọi thông báo bắn `TaskDialog` | Khung nhật ký trong pane + file log ở `%LocalAppData%\MiniAppLoader\logs\` |
+| Phải liệt kê tay ribbon cần gỡ | Tự phát hiện bằng cách so ảnh chụp ribbon |
+| `RibbonCleanup.cs` tự reflection vào field private của Revit | `RemovePanel()` của Nice3point.Revit.Extensions |
+| `plugins.json` cạnh DLL deploy | `%AppData%\MiniAppLoader\<version>\` |
+| Không có bộ cài | MSI per-user + per-machine, chọn được từng version Revit |
+| Chỉ 2024 + 2025 | 2022 → 2027 |
+
+---
+
+## Phát triển
+
+```
+source/MiniAppLoader/   add-in
+samples/SamplePlugin/         plugin mẫu kind=Command (multi-target net48 + net8)
+samples/SampleApplication/    plugin mẫu kind=Application, tự dựng tab riêng
+build/                  ModularPipelines: compile, đóng gói, publish
+install/                WixSharp — sinh MSI
 ```
 
-`#if !REVIT2023_OR_GREATER` сompiles a block of code for Revit versions 22, 21, 20 and lower.
+Đóng gói bộ cài:
 
-## Managing Supported Revit Versions
-
-To extend or reduce the range of supported Revit API versions, you need to update the solution and project configurations.
-
-### Solution configurations
-
-Solution configurations determine which projects are built and how they are configured.
-
-To support multiple Revit versions:
-- Open the `.sln` file.
-- Add or remove configurations for each Revit version.
-
-Example:
-
-```text
-GlobalSection(SolutionConfigurationPlatforms) = preSolution
-    Debug.R25|Any CPU = Debug.R25|Any CPU
-    Debug.R26|Any CPU = Debug.R26|Any CPU
-    Debug.R27|Any CPU = Debug.R27|Any CPU
-    Release.R25|Any CPU = Release.R25|Any CPU
-    Release.R26|Any CPU = Release.R26|Any CPU
-    Release.R27|Any CPU = Release.R27|Any CPU
-EndGlobalSection
+```bash
+dotnet run --project build -- pack
 ```
 
-For example `Debug.R27` is the Debug configuration for Revit 2027 version.
+Tự cài `wix` tool, publish toàn bộ configuration `Release.Rxx`, rồi sinh MSI vào `output/`.
+Đặt `Build.Version` trong `build/appsettings.json`; để trống thì dùng GitVersion.
 
-> [!TIP]  
-> If you are just ending maintenance for some version, removing the Solution configurations without modifying the Project configurations is enough.
+Hai plugin mẫu trong `samples/` dùng để thử loader: chúng ghi mốc ra file thay vì bật dialog,
+vì dialog là modal và sẽ chặn Revit khiến mọi kiểm chứng tự động treo.
 
-### Project configurations
+---
 
-Project configurations define build conditions for specific versions.
+## Cảnh báo
 
-To add or remove support:
-- Open `.csproj` file
-- Add or remove configurations for Debug and Release builds.
-
-Example:
-
-```xml
-<PropertyGroup>
-    <Configurations>Debug.R25;Debug.R26;Debug.R27</Configurations>
-    <Configurations>$(Configurations);Release.R25;Release.R26;Release.R27</Configurations>
-</PropertyGroup>
-```
-
-> [!IMPORTANT]  
-> Edit the `.csproj` file only manually, IDEs often break configurations.
-
-Revit MSBuild SDK automatically sets the required `TargetFramework` based on the `RevitVersion`, extracted from the solution configuration name. 
-
-If you need to add support for an unreleased or unsupported version of Revit that the SDK doesn't yet know about, you can add a conditional block to specify the `TargetFramework` manually:
-
-```xml
-<PropertyGroup>
-    <TargetFramework Condition="$(RevitVersion) == '2027'">net10.0-windows7.0</TargetFramework>
-</PropertyGroup>
-```
-
-## API references
-
-To support CI/CD pipelines and build a project for Revit versions not installed on your computer, use Nuget packages.
-
-> [!NOTE]  
-> Revit API dependencies are available in the [Revit.API](https://github.com/Nice3point/RevitApi) repository.
-
-The Nuget package version must include wildcards `Version="$(RevitVersion).*"` to automatically include adding a specific package version, depending on the selected solution configuration.
-
-```xml
-<ItemGroup>
-    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="$(RevitVersion).*"/>
-    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="$(RevitVersion).*"/>
-</ItemGroup>
-```
-
-## Learn More
-
-* You can explore more on the [RevitTemplates Wiki](https://github.com/Nice3point/RevitTemplates/wiki) page.
+Đây là **công cụ cho lúc phát triển**, không phải thứ để ship cho người dùng cuối. Nó nạp
+assembly tuỳ ý vào tiến trình Revit và đụng vào API nội bộ không được Autodesk hỗ trợ.

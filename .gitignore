@@ -16,3 +16,4 @@
 ~shadow/
 samples/*/bin/
 samples/*/obj/
+output/

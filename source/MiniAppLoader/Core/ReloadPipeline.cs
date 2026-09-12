@@ -59,7 +59,10 @@ internal sealed class ReloadPipeline : IDisposable
         var directory = Path.GetDirectoryName(slot.DllPath);
         if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
         {
-            Log.Warning("Không theo dõi được '{Id}': thư mục '{Dir}' không tồn tại", slot.Id, directory);
+            // Hay gặp khi plugin chưa build lần nào, hoặc vừa clean solution. Không tự hồi
+            // phục được vì FileSystemWatcher cần một thư mục có thật, nên nói rõ cách xử lý.
+            Log.Warning("Không theo dõi được '{Id}': chưa có thư mục '{Dir}'. Build plugin rồi bấm " +
+                        "\"Nạp lại\" trong Plugin Hub để bật lại theo dõi.", slot.Id, directory);
             return;
         }
 

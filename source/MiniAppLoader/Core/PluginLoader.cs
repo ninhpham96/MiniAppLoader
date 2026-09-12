@@ -52,6 +52,17 @@ internal sealed class PluginLoader
     {
         var stopwatch = Stopwatch.StartNew();
 
+        // Phân biệt "không có file" với "file đang bị khoá" TRƯỚC khi chờ: FileNotFoundException
+        // là con của IOException, nên nếu không tách ra thì vòng chờ sẽ thử 20 lần một file
+        // không tồn tại rồi báo "đang bị ghi/khoá" — sai hoàn toàn, và đây là ca rất hay gặp
+        // (đổi nhánh, clean solution, sửa dllPath lệch đường dẫn).
+        if (!File.Exists(slot.DllPath))
+        {
+            throw new FileNotFoundException(
+                $"Không tìm thấy '{slot.DllPath}'. Plugin đã được build chưa, hay đường dẫn trong " +
+                "plugins.json đã cũ?", slot.DllPath);
+        }
+
         if (!ShadowCopy.WaitUntilReadable(slot.DllPath))
         {
             throw new IOException($"'{slot.DllPath}' vẫn đang bị ghi/khoá sau nhiều lần thử — bỏ qua lần reload này.");
