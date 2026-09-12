@@ -75,7 +75,21 @@ internal sealed class PluginLoader
         _assemblies.Remove(slot.Index);
 
         _runtime.Unload(slot.Index);
-        var assembly = _runtime.Load(slot);
+
+        Assembly assembly;
+        try
+        {
+            assembly = _runtime.Load(slot);
+        }
+        catch (BadImageFormatException exception)
+        {
+            // Thông báo gốc chỉ vào bản SHADOW ("…\~shadow\slot3.dll") — một file người dùng
+            // chưa từng nghe tới, đi tìm cũng không hiểu gì. Nói tên DLL mà HỌ khai báo.
+            throw new BadImageFormatException(
+                $"'{slot.DllPath}' không phải assembly .NET hợp lệ (file hỏng, hoặc sai kiến trúc " +
+                "x86/x64, hoặc thật ra là file khác bị đặt đuôi .dll).", slot.DllPath, exception);
+        }
+
         _assemblies[slot.Index] = assembly;
 
         stopwatch.Stop();
@@ -134,10 +148,16 @@ internal sealed class PluginLoader
     }
 
     /// <summary>
-    ///     Gọi <c>OnShutdown</c> và gỡ ribbon plugin đã tạo. Không ném: đang trên đường
-    ///     reload hoặc đang đóng Revit, nuốt lỗi tốt hơn là kẹt giữa chừng.
+    ///     Gọi <c>OnShutdown</c> và (tuỳ chọn) gỡ ribbon plugin đã tạo. Không ném: đang trên
+    ///     đường reload hoặc đang đóng Revit, nuốt lỗi tốt hơn là kẹt giữa chừng.
     /// </summary>
-    public void StopApplication(PluginSlot slot, PluginEntry entry)
+    /// <param name="removeRibbon">
+    ///     Chỉ đúng khi RELOAD hoặc GỠ plugin — lúc đó ribbon cũ phải biến mất để bản mới dựng
+    ///     lại được. Lúc ĐÓNG Revit thì bỏ qua: Revit đang tự tháo dỡ UI của nó, và
+    ///     <c>ComponentManager.Ribbon</c> có thể đã null, nên gỡ vừa vô nghĩa vừa ném
+    ///     NullReferenceException vào log mỗi lần thoát.
+    /// </param>
+    public void StopApplication(PluginSlot slot, PluginEntry entry, bool removeRibbon = true)
     {
         if (!_applications.TryGetValue(slot.Index, out var running)) return;
 
@@ -151,7 +171,7 @@ internal sealed class PluginLoader
             Log.Warning(exception, "OnShutdown của '{Id}' ném lỗi", slot.Id);
         }
 
-        if (_ribbonSnapshots.TryGetValue(slot.Index, out var snapshot))
+        if (removeRibbon && _ribbonSnapshots.TryGetValue(slot.Index, out var snapshot))
         {
             RibbonDiff.RemoveAdded(running.Application, snapshot.Before, snapshot.After,
                 entry.RibbonTabsToRemove, entry.RibbonPanelsToRemove);

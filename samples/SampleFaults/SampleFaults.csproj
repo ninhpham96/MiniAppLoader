@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Plugin cố tình hỏng, dùng để kiểm chứng các NHÁNH LỖI của loader:
+         - command ném exception lúc chạy
+         - DLL có NHIỀU class IExternalCommand (thử commandClassName) -->
+    <PropertyGroup>
+        <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
+        <LangVersion>latest</LangVersion>
+        <ImplicitUsings>true</ImplicitUsings>
+        <UseWPF>true</UseWPF>
+        <EnableDynamicLoading>true</EnableDynamicLoading>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+        <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="2024.*"/>
+        <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="2024.*"/>
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' != 'net48'">
+        <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="2026.*"/>
+        <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="2026.*"/>
+    </ItemGroup>
+
+</Project>

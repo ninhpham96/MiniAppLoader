@@ -107,6 +107,11 @@ thư mục output thật, nên đừng dùng `Location` để tìm resource nằ
 `ExternalEvent` duy nhất. Cần vậy vì `ExternalEvent.Raise()` có tính gộp: build hai plugin
 trong cùng một lần MSBuild mà mỗi slot một handler thì một lần reload sẽ bị nuốt mất.
 
+Debounce là kiểu **trailing-edge**: mỗi nhịp ghi file đẩy lùi hẹn giờ, chỉ khi file im lặng
+đủ 500 ms mới thực sự reload. Kiểu leading-edge (nhịp đầu kích hoạt, các nhịp sau bị bỏ) sẽ
+nạp phải bản ghi dở rồi bỏ qua luôn bản cuối — mà triệu chứng là "reload xong vẫn thấy code
+cũ", thứ khó ngờ nhất.
+
 **Gỡ ribbon của `kind: Application`.** Loader chụp ảnh ribbon ngay trước và ngay sau
 `OnStartup` của plugin, rồi khi reload chỉ gỡ đúng phần chênh lệch. Khai báo tay như bản cũ
 chắc chắn lệch sau vài lần plugin đổi ribbon, và ghi nhầm tên một panel dùng chung là xoá mất
@@ -133,6 +138,26 @@ Chạy thật qua [rvt-mcp](https://github.com/bimwright/rvt-mcp), không dừng
 | Ribbon của add-in khác còn nguyên sau reload | ✅ | ✅ |
 | Thêm / gỡ / tái dùng slot | — | ✅ |
 | Dependency riêng của plugin | ✅ (xem giới hạn) | ✅ |
+
+### Nhánh lỗi (Revit 2026)
+
+| Tình huống | Kết quả |
+|---|---|
+| `plugins.json` sai cú pháp | Báo đúng dòng + cách sửa; ribbon và pane vẫn dựng bình thường |
+| DLL không tồn tại | *"Không tìm thấy '…'. Plugin đã được build chưa…"* |
+| File không phải assembly .NET | Nêu đúng DLL bạn khai (không phải bản shadow) + các nguyên nhân thường gặp |
+| DLL không có `IExternalCommand` | Nêu tên assembly, không phải `NullReferenceException` |
+| Command ném exception lúc chạy | Bắt được, ghi log, slot chuyển Error, **Revit sống** |
+| `OnStartup` của plugin Application ném | Ghi log, **các plugin còn lại vẫn nạp tiếp** |
+| Thêm trùng DLL đã nạp | Từ chối, nêu tên plugin đang giữ nó |
+| Cạn 16 slot | Từ chối, bảo gỡ bớt; config khai 20 thì lấy 16 và cảnh báo |
+| Thêm thất bại | Slot được **trả lại pool**, không rò rỉ |
+| Build 2 plugin trong 1 lần MSBuild | **Cả hai** cùng reload |
+| Đóng Revit | `OnShutdown` của plugin chạy, log sạch không warning |
+
+Khi plugin ném exception, loader trả `Result.Failed` kèm message nên **Revit hiện hộp
+thoại lỗi chuẩn của nó** — giống hệt add-in cài bình thường. Lỗi vẫn được ghi song song vào
+khung nhật ký và file log.
 
 Build sạch, 0 warning, trên cả 6 configuration `R22`…`R27`.
 

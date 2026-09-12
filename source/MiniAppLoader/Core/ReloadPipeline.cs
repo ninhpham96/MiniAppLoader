@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using Autodesk.Revit.UI;
 using Serilog;
 using ExternalEvent = Nice3point.Revit.Toolkit.External.ExternalEvent;
@@ -29,14 +30,14 @@ namespace MiniAppLoader.Core;
 internal sealed class ReloadPipeline : IDisposable
 {
     /// <summary>
-    ///     Một lần build ghi DLL nhiều nhịp liên tiếp. 500 ms thay vì 300 ms của bản v1, và
-    ///     dù sao <see cref="Runtime.ShadowCopy.WaitUntilReadable"/> vẫn còn chờ mở được file
-    ///     — chỉ debounce theo thời gian là không đủ.
+    ///     Khoảng IM LẶNG cần có trước khi coi là build đã xong. Xem
+    ///     <see cref="OnFileTouched"/> để biết vì sao phải là "im lặng" chứ không phải
+    ///     "đã bao lâu kể từ nhịp đầu".
     /// </summary>
     private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(500);
 
     private readonly Dictionary<int, List<FileSystemWatcher>> _watchers = [];
-    private readonly Dictionary<int, DateTime> _lastRaised = [];
+    private readonly Dictionary<int, Timer> _debounce = [];
     private readonly ConcurrentDictionary<int, byte> _dirty = [];
     private readonly Action<PluginSlot, UIApplication> _onReload;
     private readonly Func<int, PluginSlot?> _resolveSlot;
@@ -90,6 +91,11 @@ internal sealed class ReloadPipeline : IDisposable
 
     public void Unwatch(int slotIndex)
     {
+        lock (_debounce)
+        {
+            if (_debounce.Remove(slotIndex, out var timer)) timer.Dispose();
+        }
+
         if (!_watchers.Remove(slotIndex, out var watchers)) return;
 
         foreach (var watcher in watchers) watcher.Dispose();
@@ -105,6 +111,12 @@ internal sealed class ReloadPipeline : IDisposable
 
     public void Dispose()
     {
+        lock (_debounce)
+        {
+            foreach (var timer in _debounce.Values) timer.Dispose();
+            _debounce.Clear();
+        }
+
         foreach (var watchers in _watchers.Values)
         foreach (var watcher in watchers)
         {
@@ -114,14 +126,41 @@ internal sealed class ReloadPipeline : IDisposable
         _watchers.Clear();
     }
 
-    /// <summary>Chạy trên ThreadPool — TUYỆT ĐỐI không đụng Revit API hay state của slot ở đây.</summary>
+    /// <summary>
+    ///     Chạy trên ThreadPool — TUYỆT ĐỐI không đụng Revit API hay state của slot ở đây.
+    ///     <para>
+    ///         Debounce kiểu TRAILING-EDGE: mỗi nhịp ghi file đẩy lùi hẹn giờ, và chỉ khi file
+    ///         đã im lặng đủ <see cref="Debounce"/> mới thực sự yêu cầu reload.
+    ///     </para>
+    ///     <para>
+    ///         Bản trước làm leading-edge: nhịp đầu kích hoạt ngay, mọi nhịp trong cửa sổ sau
+    ///         đó bị VỨT BỎ. MSBuild thường ghi DLL nhiều nhịp cho một lần build, nên kiểu đó
+    ///         có thể nạp phải bản ghi dở rồi bỏ qua luôn bản cuối cùng — và triệu chứng là
+    ///         "reload xong mà vẫn thấy code cũ", đúng thứ khó ngờ nhất.
+    ///         <see cref="Runtime.ShadowCopy.WaitUntilReadable"/> không cứu được ca này: nó chỉ
+    ///         đảm bảo lúc mở file không bị khoá, chứ không biết MSBuild còn ghi tiếp hay không.
+    ///     </para>
+    /// </summary>
     private void OnFileTouched(int slotIndex)
     {
-        lock (_lastRaised)
+        lock (_debounce)
         {
-            var now = DateTime.UtcNow;
-            if (_lastRaised.TryGetValue(slotIndex, out var previous) && now - previous < Debounce) return;
-            _lastRaised[slotIndex] = now;
+            if (_debounce.TryGetValue(slotIndex, out var existing))
+            {
+                existing.Change(Debounce, Timeout.InfiniteTimeSpan);
+                return;
+            }
+
+            _debounce[slotIndex] = new Timer(_ => OnQuietPeriodElapsed(slotIndex), null, Debounce, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    /// <summary>File đã im lặng đủ lâu — giờ mới thực sự xin reload.</summary>
+    private void OnQuietPeriodElapsed(int slotIndex)
+    {
+        lock (_debounce)
+        {
+            if (_debounce.Remove(slotIndex, out var timer)) timer.Dispose();
         }
 
         _dirty[slotIndex] = 0;

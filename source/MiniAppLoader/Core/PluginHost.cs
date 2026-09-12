@@ -73,7 +73,9 @@ public sealed class PluginHost
 
         foreach (var slot in _current.Slots.ActiveSlots().Where(slot => slot.Kind == PluginKind.Application))
         {
-            _current._loader.StopApplication(slot, EntryOf(slot));
+            // Revit đang đóng: cho plugin cơ hội dọn state của nó, nhưng KHÔNG đụng vào
+            // ribbon — Revit tự lo phần đó, và UI của nó có thể đã tháo dỡ xong.
+            _current._loader.StopApplication(slot, EntryOf(slot), removeRibbon: false);
         }
 
         _current._pipeline.Dispose();

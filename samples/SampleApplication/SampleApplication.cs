@@ -23,7 +23,7 @@ namespace SampleApplication;
 public class SampleApplication : IExternalApplication
 {
     /// <summary>Đổi hằng số này rồi build lại để xác nhận loader nạp đúng bản mới.</summary>
-    private const string Version = "APP VERSION 14 net48";
+    private const string Version = "APP VERSION 21";
 
     /// <summary>Tab riêng của plugin — loader phải tự phát hiện và gỡ đúng cái này khi reload.</summary>
     private const string TabName = "Sample App Tab";
@@ -52,6 +52,13 @@ public class SampleApplication : IExternalApplication
     public Result OnStartup(UIControlledApplication application)
     {
         Mark("OnStartup " + Version);
+
+        // Công tắc thứ hai: ném ngay trong OnStartup, để kiểm chứng loader ghi nhận lỗi và
+        // VẪN nạp tiếp các plugin còn lại thay vì bỏ dở cả vòng.
+        if (File.Exists(NoRibbonSwitch + "-throw"))
+        {
+            throw new InvalidOperationException("Lỗi cố ý từ OnStartup của SampleApplication.");
+        }
 
         if (File.Exists(NoRibbonSwitch))
         {
