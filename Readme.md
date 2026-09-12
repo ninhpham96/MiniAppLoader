@@ -159,9 +159,27 @@ Khi plugin ném exception, loader trả `Result.Failed` kèm message nên **Revi
 thoại lỗi chuẩn của nó** — giống hệt add-in cài bình thường. Lỗi vẫn được ghi song song vào
 khung nhật ký và file log.
 
+### Thao tác UI (Revit 2026, bấm chuột thật)
+
+| Thao tác | Kết quả |
+|---|---|
+| Ô tìm kiếm | Lọc theo tên plugin và theo đường dẫn DLL; xoá ô lọc thì danh sách trở lại |
+| **Chạy** | Plugin thực sự chạy (ghi mốc ra file) |
+| **Nạp lại** | Sinh một lần nạp mới trong log |
+| Ô **auto** | Ghi thẳng vào `plugins.json`: `autoReload` True → False → True |
+| **Gỡ** | Config về 0 plugin, **nút trên ribbon biến mất ngay**, khối "chưa có plugin nào" hiện ra |
+| **+ Thêm** | Mở đúng hộp thoại chọn file của add-in |
+| **Xoá** nhật ký | Khung log về rỗng |
+| Đổi theme Revit sáng↔tối | Pane đổi màu ngay, không cần khởi động lại |
+| Reload khi Revit đang kẹt modal dialog | Hoãn lại (không nạp), đóng dialog xong mới nạp |
+| `plugins.json` kiểu bản v1 nằm cạnh DLL | Tự chuyển sang `%AppData%\MiniAppLoader\<version>\` ngay lần chạy đầu |
+
 Build sạch, 0 warning, trên cả 6 configuration `R22`…`R27`.
 
-Revit 2023, 2025, 2027 chỉ build qua NuGet — chưa chạy thử vì máy phát triển không cài.
+**Chưa kiểm chứng:** kéo-thả DLL vào pane (cần OLE drag source, không tự động hoá gọn được),
+`IHotCommand`, hai field override `ribbonTabsToRemove`/`ribbonPanelsToRemove`, và vòng
+hot-reload `kind: Command` đầy đủ trên net48. Revit 2023/2025/2027 chỉ build qua NuGet —
+máy phát triển không cài. Bộ cài MSI mới chỉ soi cấu trúc bên trong, chưa cài thử.
 
 ---
 
