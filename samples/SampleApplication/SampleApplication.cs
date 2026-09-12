@@ -23,7 +23,7 @@ namespace SampleApplication;
 public class SampleApplication : IExternalApplication
 {
     /// <summary>Đổi hằng số này rồi build lại để xác nhận loader nạp đúng bản mới.</summary>
-    private const string Version = "APP VERSION 13";
+    private const string Version = "APP VERSION 14 net48";
 
     /// <summary>Tab riêng của plugin — loader phải tự phát hiện và gỡ đúng cái này khi reload.</summary>
     private const string TabName = "Sample App Tab";

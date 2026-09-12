@@ -21,24 +21,38 @@ internal sealed class PluginLoadContext(string pluginDllPath) : AssemblyLoadCont
     /// </summary>
     private readonly AssemblyDependencyResolver _resolver = new(pluginDllPath);
 
+    /// <summary>
+    ///     Những assembly BẮT BUỘC dùng chung với tiến trình Revit, vì type của chúng đi qua
+    ///     ranh giới giữa loader và plugin: nạp bản thứ hai là gặp ngay lỗi kiểu "unable to
+    ///     cast IExternalCommand to IExternalCommand".
+    ///     <para>
+    ///         Danh sách này cố ý HẸP. Bản đầu nhường cho Default MỌI assembly đã nạp sẵn, và
+    ///         đo trên Revit 2026 cho thấy hậu quả: plugin tham chiếu Newtonsoft.Json 13.0.4
+    ///         của chính nó vẫn nhận bản Revit ship trong thư mục cài. Như vậy là ném đi đúng
+    ///         thứ khiến ALC đáng dùng, và tái tạo trên .NET 8 đúng cái hạn chế mà .NET
+    ///         Framework không tránh được. Giờ chỉ Revit API + chính loader mới dùng chung;
+    ///         thư viện nào plugin tự ship thì nạp private cho plugin đó.
+    ///     </para>
+    /// </summary>
+    private static bool MustShareWithHost(string? assemblyName)
+    {
+        if (assemblyName is null) return false;
+
+        return assemblyName.StartsWith("RevitAPI", StringComparison.OrdinalIgnoreCase)
+               || assemblyName.StartsWith("Autodesk.", StringComparison.OrdinalIgnoreCase)
+               || assemblyName.Equals("AdWindows", StringComparison.OrdinalIgnoreCase)
+               || assemblyName.StartsWith("UIFramework", StringComparison.OrdinalIgnoreCase)
+               || assemblyName.Equals(typeof(PluginLoadContext).Assembly.GetName().Name, StringComparison.OrdinalIgnoreCase);
+    }
+
     protected override Assembly? Load(AssemblyName assemblyName)
     {
-        // ĐIỂM MẤU CHỐT: nếu một assembly cùng tên ĐÃ nằm trong Default context (RevitAPI,
-        // RevitAPIUI, MiniAppLoader, hay bất kỳ lib nào Revit/loader đã nạp), phải nhường
-        // cho Default để giữ nguyên type identity. Thiếu bước này là gặp ngay lỗi kiểu
-        // "unable to cast IExternalCommand to IExternalCommand".
-        foreach (var loaded in Default.Assemblies)
-        {
-            if (string.Equals(loaded.GetName().Name, assemblyName.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-        }
+        if (MustShareWithHost(assemblyName.Name)) return null;
 
-        // Ngược lại: dependency riêng của plugin -> nạp PRIVATE vào context này để nó bị gỡ
-        // cùng lúc với plugin. Nạp thẳng từ path (khoá file dependency đó) thay vì qua
-        // stream: dependency NuGet hiếm khi bị rebuild lúc dev, và tránh cho nó cũng dính
-        // Assembly.Location rỗng.
+        // Dependency riêng của plugin -> nạp PRIVATE vào context này để nó bị gỡ cùng lúc với
+        // plugin, và để plugin dùng đúng PHIÊN BẢN nó build cùng. Resolver đọc .deps.json nên
+        // chỉ trả về path cho thứ plugin thật sự ship; assembly của framework không nằm trong
+        // đó, trả null và runtime tự lo qua Default như bình thường.
         var path = _resolver.ResolveAssemblyToPath(assemblyName);
         return path is null ? null : LoadFromAssemblyPath(path);
     }

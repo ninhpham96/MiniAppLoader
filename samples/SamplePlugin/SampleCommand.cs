@@ -18,7 +18,7 @@ namespace SamplePlugin;
 public class SampleCommand : IExternalCommand
 {
     /// <summary>Đổi hằng số này rồi build lại để xác nhận loader thật sự nạp bản mới.</summary>
-    private const string Version = "VERSION 5 - multi-target";
+    private const string Version = "VERSION 6 - alc isolation";
 
     public static string MarkerPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
