@@ -86,9 +86,19 @@ internal static class RibbonDiff
     {
         var addedPanels = after.Panels.Except(before.Panels).ToList();
 
+        // Override thủ công tra trên ribbon HIỆN TẠI, không phải ảnh chụp "after".
+        //
+        // Ảnh chụp đó lấy ngay sau OnStartup nên không bao giờ chứa panel xuất hiện muộn
+        // hơn — mà đó chính là trường hợp duy nhất cần tới override: panel diff không quy
+        // được cho plugin. Tra trong "after" khiến hai field này không làm được đúng việc
+        // chúng sinh ra để làm (đã dựng lại lỗi thật: một panel lạ trên tab của plugin làm
+        // tab không gỡ được, OnStartup sau đó ném "tab exists already", và khai tường minh
+        // panel đó trong plugins.json cũng không cứu được).
+        var live = Snapshot();
+
         foreach (var panelRef in explicitPanels)
         {
-            var match = after.Panels.FirstOrDefault(key =>
+            var match = live.Panels.FirstOrDefault(key =>
                 key.TabId == panelRef.TabName && key.PanelTitle == panelRef.PanelName);
 
             if (match != default && !addedPanels.Contains(match)) addedPanels.Add(match);
@@ -96,7 +106,7 @@ internal static class RibbonDiff
 
         foreach (var tabName in explicitTabs)
         {
-            addedPanels.AddRange(after.Panels.Where(key => key.TabId == tabName && !addedPanels.Contains(key)));
+            addedPanels.AddRange(live.Panels.Where(key => key.TabId == tabName && !addedPanels.Contains(key)));
         }
 
         foreach (var key in addedPanels) RemovePanel(application, key);

@@ -140,11 +140,23 @@ internal sealed class PluginLoader
 
         var instance = (IExternalApplication)Activator.CreateInstance(type)!;
 
-        var before = RibbonDiff.Snapshot();
-        instance.OnStartup(controlled);
-        _ribbonSnapshots[slot.Index] = (before, RibbonDiff.Snapshot());
+        // Giữ controlled app TRƯỚC khi gọi OnStartup: nếu OnStartup ném, lần reload sau vẫn
+        // phải gỡ được phần ribbon plugin kịp dựng, mà gỡ thì cần đúng object này.
+        _controlled[slot.Index] = controlled;
 
-        _applications[slot.Index] = (instance, controlled);
+        var before = RibbonDiff.Snapshot();
+        try
+        {
+            instance.OnStartup(controlled);
+            _applications[slot.Index] = (instance, controlled);
+        }
+        finally
+        {
+            // Chụp cả khi OnStartup ném. Plugin thường đã dựng xong tab + vài panel rồi mới
+            // hỏng ở panel tiếp theo; không ghi lại thì phần đã dựng thành rác vĩnh viễn và
+            // mọi lần nạp sau đều ném "The tab with the input name exists already".
+            _ribbonSnapshots[slot.Index] = (before, RibbonDiff.Snapshot());
+        }
     }
 
     /// <summary>
@@ -159,37 +171,61 @@ internal sealed class PluginLoader
     /// </param>
     public void StopApplication(PluginSlot slot, PluginEntry entry, bool removeRibbon = true)
     {
-        if (!_applications.TryGetValue(slot.Index, out var running)) return;
+        // OnShutdown chỉ gọi khi lần OnStartup trước ĐÃ chạy xong: gọi nó trên một plugin
+        // hỏng giữa chừng thì nó phải dọn thứ nó chưa kịp tạo.
+        if (_applications.TryGetValue(slot.Index, out var running))
+        {
+            try
+            {
+                running.Instance.OnShutdown(running.Application);
+            }
+            catch (Exception exception)
+            {
+                slot.LastError = "OnShutdown của plugin ném lỗi: " + exception.Message;
+                Log.Warning(exception, "OnShutdown của '{Id}' ném lỗi", slot.Id);
+            }
 
-        try
-        {
-            running.Instance.OnShutdown(running.Application);
-        }
-        catch (Exception exception)
-        {
-            slot.LastError = "OnShutdown của plugin ném lỗi: " + exception.Message;
-            Log.Warning(exception, "OnShutdown của '{Id}' ném lỗi", slot.Id);
-        }
-
-        if (removeRibbon && _ribbonSnapshots.TryGetValue(slot.Index, out var snapshot))
-        {
-            RibbonDiff.RemoveAdded(running.Application, snapshot.Before, snapshot.After,
-                entry.RibbonTabsToRemove, entry.RibbonPanelsToRemove);
-            _ribbonSnapshots.Remove(slot.Index);
+            _applications.Remove(slot.Index);
         }
 
-        _applications.Remove(slot.Index);
+        if (!removeRibbon) return;
+
+        // Dọn ribbon KHÔNG phụ thuộc vào việc plugin có chạy được hay không. Bản trước
+        // thoát ngay ở dòng đầu khi _applications rỗng, nên một lần OnStartup hỏng là kẹt
+        // vĩnh viễn: ribbon rác ở lại, mọi lần reload sau đều hỏng đúng chỗ cũ, và hai field
+        // override trong plugins.json không bao giờ được đọc tới. Phải restart Revit mới
+        // thoát ra được — đã dựng lại được lỗi này trên Revit 2026.
+        if (!_controlled.TryGetValue(slot.Index, out var controlled)) return;
+
+        var hasOverride = entry.RibbonTabsToRemove.Count > 0 || entry.RibbonPanelsToRemove.Count > 0;
+        if (!_ribbonSnapshots.TryGetValue(slot.Index, out var snapshot))
+        {
+            if (!hasOverride) return;
+            snapshot = (RibbonSnapshot.Empty, RibbonSnapshot.Empty);
+        }
+
+        RibbonDiff.RemoveAdded(controlled, snapshot.Before, snapshot.After,
+            entry.RibbonTabsToRemove, entry.RibbonPanelsToRemove);
+        _ribbonSnapshots.Remove(slot.Index);
     }
 
     /// <summary>Gỡ hẳn slot (khi người dùng bấm Gỡ, hoặc lúc Revit đóng).</summary>
     public UnloadResult Unload(PluginSlot slot)
     {
         _assemblies.Remove(slot.Index);
+        _controlled.Remove(slot.Index);
         return _runtime.Unload(slot.Index);
     }
 
     /// <summary>Ảnh chụp ribbon trước/sau <c>OnStartup</c> của từng slot Kind=Application.</summary>
     private readonly Dictionary<int, (RibbonSnapshot Before, RibbonSnapshot After)> _ribbonSnapshots = [];
+
+    /// <summary>
+    ///     <see cref="UIControlledApplication"/> của từng slot Kind=Application. Tách riêng
+    ///     khỏi <c>_applications</c> vì phải dùng được cả khi <c>OnStartup</c> đã ném — lúc
+    ///     đó không có instance nào nhưng ribbon vẫn cần dọn.
+    /// </summary>
+    private readonly Dictionary<int, UIControlledApplication> _controlled = [];
 
     /// <summary>
     ///     Tìm class cụ thể implement <paramref name="contract"/>. Ưu tiên

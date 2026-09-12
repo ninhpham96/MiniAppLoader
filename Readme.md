@@ -140,6 +140,7 @@ Chạy thật qua [rvt-mcp](https://github.com/bimwright/rvt-mcp), không dừng
 | Dependency riêng của plugin | ✅ (xem giới hạn) | ✅ |
 | `IHotCommand` — tự chạy lại sau build, không chạm chuột | — | ✅ (2 vòng, ~540 ms sau khi build xong) |
 | Kéo-thả DLL từ Explorer vào pane | — | ✅ (kể cả nhánh từ chối DLL không có entry point) |
+| `ribbonPanelsToRemove` gỡ được panel diff không thấy | — | ✅ (sau khi sửa lỗi, xem dưới) |
 
 ### Nhánh lỗi (Revit 2026)
 
@@ -178,9 +179,32 @@ khung nhật ký và file log.
 
 Build sạch, 0 warning, trên cả 6 configuration `R22`…`R27`.
 
-**Chưa kiểm chứng:** hai field override `ribbonTabsToRemove`/`ribbonPanelsToRemove`, và vòng
-hot-reload `kind: Command` đầy đủ trên net48. Revit 2023/2025/2027 chỉ build qua NuGet —
+**Chưa kiểm chứng:** vòng hot-reload `kind: Command` đầy đủ trên net48. Revit 2023/2025/2027 chỉ build qua NuGet —
 máy phát triển không cài. Bộ cài MSI mới chỉ soi cấu trúc bên trong, chưa cài thử.
+
+---
+
+## Một lỗi tìm ra khi kiểm chứng override ribbon
+
+Hai field `ribbonTabsToRemove`/`ribbonPanelsToRemove` có code từ đầu nhưng chưa ai chạy thử.
+Dựng đúng kịch bản chúng sinh ra để cứu — một panel lạ xuất hiện trên tab của plugin **sau**
+khi `OnStartup` đã chạy xong, nên ribbon diff không quy được cho plugin — thì lộ ra hai lỗi
+chồng nhau:
+
+1. **Override tra panel trong ảnh chụp `after`.** Ảnh đó lấy ngay sau `OnStartup`, nên không
+   bao giờ chứa panel xuất hiện muộn hơn — mà đó là trường hợp duy nhất cần tới override.
+   Khai tường minh panel trong `plugins.json` cũng vô ích.
+2. **`OnStartup` ném thì kẹt vĩnh viễn.** Snapshot và instance đều được gán *sau* lời gọi
+   `OnStartup`, nên khi nó ném thì cả hai đều trống; lần reload sau `StopApplication` thoát
+   ngay ở dòng đầu và không bao giờ dọn ribbon nữa. Phải restart Revit mới thoát.
+
+Hậu quả thực tế: panel lạ chặn việc gỡ tab → `OnStartup` sau đó ném "The tab with the input
+name exists already" → plugin chết cứng cho tới khi restart.
+
+Đã sửa: override tra trên ribbon **hiện tại** thay vì ảnh chụp; snapshot ghi trong `finally`
+nên vẫn có khi `OnStartup` ném; và việc dọn ribbon tách khỏi việc plugin có chạy được hay
+không. Kiểm chứng trên Revit 2026: cùng kịch bản, override gỡ đúng panel lạ và reload chạy
+lại bình thường; 3 vòng reload thường không hồi quy.
 
 ---
 
