@@ -14,6 +14,7 @@
 
         <views:StatusBrushConverter x:Key="StatusBrush"/>
         <views:InverseBoolToVisibilityConverter x:Key="EmptyState"/>
+        <views:PositiveToVisibilityConverter x:Key="WhenPositive"/>
 
         <!-- Nút phẳng, chỉ nổi khối khi hover - giữ cho pane yên tĩnh lúc không thao tác. -->
         <Style x:Key="FlatButton" TargetType="Button">
@@ -143,6 +144,7 @@
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
                                         </Grid.RowDefinitions>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto"/>
@@ -176,7 +178,16 @@
                                                    ToolTip="{Binding DllPath}"
                                                    Foreground="{DynamicResource Hub.TextDim}"/>
 
-                                        <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2"
+                                        <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2"
+                                                   Margin="0,2,0,0"
+                                                   FontSize="10"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource Hub.TextDim}"
+                                                   Visibility="{Binding StaleLoads, Converter={StaticResource WhenPositive}}"
+                                                   ToolTip="Chỉ là bộ nhớ chưa thu hồi — code đang chạy vẫn luôn là bản mới nhất. Plugin kiểu Application gần như luôn tăng dần: đo trên Revit 2026 cho thấy mỗi lần reload để lại một assembly không thu hồi được, kể cả khi plugin không dựng ribbon nào. Đây là giới hạn đã biết, không phải lỗi của bạn — reload vài chục lần thì không sao, rất nhiều thì restart Revit."
+                                                   Text="{Binding StaleLoads, StringFormat={}{0} bản cũ chưa thu hồi}"/>
+
+                                        <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"
                                                     Orientation="Horizontal" Margin="0,4,0,0">
                                             <Button Style="{StaticResource FlatButton}" FontSize="11"
                                                     Content="Chạy"

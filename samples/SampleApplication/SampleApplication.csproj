@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- Plugin mẫu kiểu Kind="Application": tự dựng tab/panel/nút ribbon riêng trong
+         OnStartup như một add-in độc lập. KHÔNG có .addin và KHÔNG deploy vào thư mục Addins
+         — nó chỉ tồn tại để MiniAppLoader nạp từ bin này.
+
+         Multi-target để thử được cả hai nhánh runtime của loader: net48 (Revit ≤2024, không
+         unload được) và net8.0-windows (Revit 2025+, collectible ALC). -->
+    <PropertyGroup>
+        <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
+        <LangVersion>latest</LangVersion>
+        <ImplicitUsings>true</ImplicitUsings>
+        <UseWPF>true</UseWPF>
+        <EnableDynamicLoading>true</EnableDynamicLoading>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+        <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="2024.*"/>
+        <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="2024.*"/>
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' != 'net48'">
+        <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="2026.*"/>
+        <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="2026.*"/>
+    </ItemGroup>
+
+</Project>

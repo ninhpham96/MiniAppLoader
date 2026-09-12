@@ -63,23 +63,22 @@ internal sealed class PluginLoader
         // dù plugin hoàn toàn sạch. Đã gặp thật khi test trên Revit 2026.
         _assemblies.Remove(slot.Index);
 
-        var previousUnload = _runtime.Unload(slot.Index);
+        _runtime.Unload(slot.Index);
         var assembly = _runtime.Load(slot);
         _assemblies[slot.Index] = assembly;
 
         stopwatch.Stop();
         slot.LastLoadedAt = DateTime.Now;
         slot.LastLoadDuration = stopwatch.Elapsed;
+        slot.Status = PluginStatus.Loaded;
+        slot.LastError = null;
 
-        // StillAlive = plugin đang bị giữ chặt nên bản CŨ vẫn nằm trong tiến trình. Bản v1
-        // im lặng ở đây và bạn không bao giờ biết mình đang chạy code cũ.
-        slot.Status = previousUnload == UnloadResult.StillAlive ? PluginStatus.Leaked : PluginStatus.Loaded;
-        slot.LastError = previousUnload == UnloadResult.StillAlive
-            ? "Bản cũ chưa được giải phóng (plugin còn giữ reference, thường do subscribe sự kiện Revit mà không nhả). " +
-              "Code cũ vẫn nằm trong tiến trình — restart Revit để nạp sạch."
-            : null;
+        // Kiểm tra LƯỜI, sau khi đã nạp xong: đếm xem bản cũ nào còn chưa được GC thu hồi.
+        // Không ép GC ở đây — xem AlcPluginRuntime để biết vì sao.
+        slot.StaleLoads = _runtime.CountStaleLoads(slot.Index);
 
-        Log.Information("Đã nạp '{Id}' trong {Ms} ms ({Status})", slot.Id, stopwatch.ElapsedMilliseconds, slot.Status);
+        Log.Information("Đã nạp '{Id}' trong {Ms} ms{Stale}", slot.Id, stopwatch.ElapsedMilliseconds,
+            slot.StaleLoads > 0 ? $" ({slot.StaleLoads} bản cũ chưa thu hồi)" : string.Empty);
         return assembly;
     }
 
@@ -118,7 +117,7 @@ internal sealed class PluginLoader
 
         var before = RibbonDiff.Snapshot();
         instance.OnStartup(controlled);
-        RibbonSnapshots[slot.Index] = (before, RibbonDiff.Snapshot());
+        _ribbonSnapshots[slot.Index] = (before, RibbonDiff.Snapshot());
 
         _applications[slot.Index] = (instance, controlled);
     }
@@ -141,11 +140,11 @@ internal sealed class PluginLoader
             Log.Warning(exception, "OnShutdown của '{Id}' ném lỗi", slot.Id);
         }
 
-        if (RibbonSnapshots.TryGetValue(slot.Index, out var snapshot))
+        if (_ribbonSnapshots.TryGetValue(slot.Index, out var snapshot))
         {
             RibbonDiff.RemoveAdded(running.Application, snapshot.Before, snapshot.After,
                 entry.RibbonTabsToRemove, entry.RibbonPanelsToRemove);
-            RibbonSnapshots.Remove(slot.Index);
+            _ribbonSnapshots.Remove(slot.Index);
         }
 
         _applications.Remove(slot.Index);
@@ -158,8 +157,8 @@ internal sealed class PluginLoader
         return _runtime.Unload(slot.Index);
     }
 
-    private readonly Dictionary<int, (IReadOnlyCollection<RibbonPanelKey> Before, IReadOnlyCollection<RibbonPanelKey> After)>
-        RibbonSnapshots = [];
+    /// <summary>Ảnh chụp ribbon trước/sau <c>OnStartup</c> của từng slot Kind=Application.</summary>
+    private readonly Dictionary<int, (RibbonSnapshot Before, RibbonSnapshot After)> _ribbonSnapshots = [];
 
     /// <summary>
     ///     Tìm class cụ thể implement <paramref name="contract"/>. Ưu tiên

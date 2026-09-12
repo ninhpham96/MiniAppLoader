@@ -1,6 +1,7 @@
 #if NET8_0_OR_GREATER
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
@@ -53,10 +54,25 @@ internal sealed class PluginLoadContext(string pluginDllPath) : AssemblyLoadCont
 
 /// <summary>
 ///     Runtime cho Revit 2025+ (.NET 8/10): nạp vào ALC collectible, gỡ được thật.
+///     <para>
+///         <b>Cố ý KHÔNG ép GC sau khi gỡ.</b> Bản đầu có vòng lặp tới 10 lần
+///         <c>GC.Collect()</c> + <c>WaitForPendingFinalizers()</c> để kết luận ngay "đã thu
+///         hồi chưa". Đo trên Revit 2026 thì nó vừa CHẬM (treo thread UI của Revit ~2,3 giây
+///         mỗi lần reload) vừa KHÔNG ĐÁNG TIN — cùng một plugin, cùng một thao tác, có lần
+///         thu được sau 480 ms, có lần 10 vòng vẫn chưa. Việc gỡ ALC vốn là bất đồng bộ.
+///     </para>
+///     <para>
+///         Quan trọng hơn: thu hồi được hay chưa KHÔNG ảnh hưởng tính đúng đắn. Mỗi lần
+///         reload tạo một ALC mới và nạp DLL mới, nên code chạy luôn là code mới nhất. Bản cũ
+///         còn nằm lại chỉ là bộ nhớ. Vì vậy: gỡ xong là xong, còn việc đếm bản cũ chưa thu
+///         hồi thì kiểm tra LƯỜI ở lần nạp sau (xem <see cref="CountStaleLoads"/>) — không
+///         tốn gì và không bắt Revit đứng hình.
+///     </para>
 /// </summary>
 internal sealed class AlcPluginRuntime : IPluginRuntime
 {
     private readonly Dictionary<int, PluginLoadContext> _contexts = [];
+    private readonly Dictionary<int, List<WeakReference>> _unloading = [];
     private readonly Dictionary<int, string> _dllPaths = [];
 
     public Assembly Load(PluginSlot slot)
@@ -76,34 +92,38 @@ internal sealed class AlcPluginRuntime : IPluginRuntime
         var reference = DetachContext(slotIndex);
         if (reference is null) return UnloadResult.NothingLoaded;
 
-        // Vòng GC này PHẢI nằm ngoài method đang giữ biến cục bộ trỏ tới context — xem
-        // DetachContext. Thường 2 vòng là đủ; 10 chỉ để chắc chắn.
-        for (var attempt = 0; attempt < 10 && reference.IsAlive; attempt++)
+        if (!_unloading.TryGetValue(slotIndex, out var pending))
         {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
+            pending = [];
+            _unloading[slotIndex] = pending;
         }
 
-        // ALC vừa nhả khoá -> dọn luôn bản shadow của lần nạp trước.
+        pending.Add(reference);
+
+        // Best-effort: bản shadow của lần nạp trước thường đã hết bị khoá sau khi GC thu hồi
+        // ALC. Chưa nhả thì bỏ qua, lần sau dọn tiếp.
         if (_dllPaths.TryGetValue(slotIndex, out var dllPath)) ShadowCopy.CleanupOld(dllPath);
 
-        return reference.IsAlive ? UnloadResult.StillAlive : UnloadResult.Released;
+        return UnloadResult.Requested;
+    }
+
+    public int CountStaleLoads(int slotIndex)
+    {
+        if (!_unloading.TryGetValue(slotIndex, out var pending)) return 0;
+
+        pending.RemoveAll(reference => !reference.IsAlive);
+        return pending.Count;
     }
 
     /// <summary>
     ///     Gỡ context ra khỏi dictionary, gọi <c>Unload()</c>, rồi TRẢ VỀ — cố ý tách thành
     ///     method riêng và cấm inline.
     ///     <para>
-    ///         <c>AssemblyLoadContext.Unload()</c> chỉ đánh dấu; context chỉ thật sự chết khi
-    ///         GC không còn thấy reference nào tới nó. Một BIẾN CỤC BỘ trỏ tới context vẫn
-    ///         được tính là reference sống cho tới hết scope của method — đặc biệt ở build
-    ///         Debug, nơi JIT không rút ngắn tuổi thọ biến. Nếu gọi <c>GC.Collect()</c> ngay
-    ///         trong method còn giữ biến đó thì không đời nào thu được, và slot sẽ báo
-    ///         "Leaked" dù plugin hoàn toàn sạch.
-    ///     </para>
-    ///     <para>
-    ///         Đây là pattern chính thức trong tài liệu .NET về assembly unloadability, và đã
-    ///         gặp đúng triệu chứng này khi test thật trên Revit 2026.
+    ///         Một BIẾN CỤC BỘ trỏ tới context vẫn được tính là reference sống cho tới hết
+    ///         scope của method — đặc biệt ở build Debug, nơi JIT không rút ngắn tuổi thọ
+    ///         biến. Nếu kiểm tra <see cref="WeakReference"/> ngay trong method còn giữ biến
+    ///         đó thì không đời nào thấy nó chết. Đây là pattern chính thức trong tài liệu
+    ///         .NET về assembly unloadability.
     ///     </para>
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]

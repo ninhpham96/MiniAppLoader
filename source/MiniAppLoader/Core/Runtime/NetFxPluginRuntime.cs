@@ -63,9 +63,16 @@ internal sealed class NetFxPluginRuntime : IPluginRuntime
         if (!_loaded.Remove(slotIndex)) return UnloadResult.NothingLoaded;
 
         // .NET Framework không unload được assembly khỏi AppDomain hiện tại. Đây là giới hạn
-        // nền tảng đã biết, không phải lỗi -> báo NotSupported để UI không hiện "Leaked".
+        // nền tảng đã biết, không phải lỗi.
         return UnloadResult.NotSupported;
     }
+
+    /// <summary>
+    ///     Luôn 0: trên .NET Framework thì MỌI bản nạp cũ đều nằm lại vĩnh viễn, nên con số
+    ///     này chỉ bằng số lần reload — không nói thêm được gì. Giới hạn đó được nêu ở
+    ///     README và trong tooltip của Plugin Hub, không cần lặp lại bằng một con số vô nghĩa.
+    /// </summary>
+    public int CountStaleLoads(int slotIndex) => 0;
 
     private void HookResolveOnce()
     {

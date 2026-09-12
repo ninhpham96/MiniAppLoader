@@ -109,6 +109,18 @@ public sealed class ConfigStore(string revitVersion, string? legacyConfigPath = 
             // Hub) — người dùng có thể chỉ đang checkout nhánh khác, xoá hộ là mất công khai báo lại.
             return entries.Where(entry => !string.IsNullOrWhiteSpace(entry.DllPath)).ToList();
         }
+        catch (JsonException exception)
+        {
+            // File này người dùng sửa tay, và lỗi hay gặp nhất là quên nhân đôi backslash
+            // trong đường dẫn Windows ("C:\dev\..." thay vì "C:\\dev\\..."). Stack trace của
+            // System.Text.Json dài và vô dụng với người đọc — nói thẳng dòng nào và cách sửa,
+            // vì đây là thứ hiện ngay trong khung nhật ký của Plugin Hub.
+            Log.Error("plugins.json sai cú pháp ở dòng {Line}: {Reason}", exception.LineNumber + 1, exception.Message);
+            Log.Error("Mẹo: trong JSON, đường dẫn Windows phải nhân đôi backslash " +
+                      @"(""C:\\dev\\MyPlugin.dll""), hoặc dùng dấu / (""C:/dev/MyPlugin.dll""). " +
+                      "Danh sách plugin tạm để trống cho tới khi sửa xong: {Path}", ConfigPath);
+            return [];
+        }
         catch (Exception exception)
         {
             Log.Error(exception, "Không đọc được {Path}", ConfigPath);

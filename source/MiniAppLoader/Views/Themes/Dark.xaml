@@ -14,7 +14,6 @@
     <SolidColorBrush x:Key="Hub.Status.Loaded"  Color="#4ADE80"/>
     <SolidColorBrush x:Key="Hub.Status.Pending" Color="#FBBF24"/>
     <SolidColorBrush x:Key="Hub.Status.Error"   Color="#F87171"/>
-    <SolidColorBrush x:Key="Hub.Status.Leaked"  Color="#C084FC"/>
     <SolidColorBrush x:Key="Hub.Status.Removed" Color="#4B5563"/>
 
 </ResourceDictionary>

@@ -47,6 +47,14 @@ public sealed partial class PluginSlot : ObservableObject
     /// <summary>Thời gian nạp của lần gần nhất, hiển thị trong log pane.</summary>
     [ObservableProperty] private TimeSpan _lastLoadDuration;
 
+    /// <summary>
+    ///     Số bản nạp CŨ còn nằm trong tiến trình. Thuần chỉ số bộ nhớ: code đang chạy luôn
+    ///     là bản mới nhất bất kể con số này. Chỉ đáng để ý khi nó tăng mãi không giảm — dấu
+    ///     hiệu plugin đang tự giữ chặt chính nó (hay gặp nhất: subscribe sự kiện Revit mà
+    ///     không nhả trong OnShutdown).
+    /// </summary>
+    [ObservableProperty] private int _staleLoads;
+
     /// <summary>Slot đang trống (chưa gán plugin nào) — nút ribbon tương ứng đang ẩn.</summary>
     public bool IsFree => string.IsNullOrEmpty(DllPath);
 }

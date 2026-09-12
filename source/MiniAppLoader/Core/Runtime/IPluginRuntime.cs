@@ -14,28 +14,35 @@ internal interface IPluginRuntime
 
     /// <summary>Gỡ bản đang nạp của slot.</summary>
     UnloadResult Unload(int slotIndex);
+
+    /// <summary>
+    ///     Số bản nạp CŨ của slot vẫn còn nằm trong tiến trình.
+    ///     <para>
+    ///         Đây thuần tuý là chỉ số BỘ NHỚ, không phải chỉ số đúng/sai: mỗi lần reload đều
+    ///         nạp một assembly hoàn toàn mới, nên code đang chạy luôn là code mới nhất dù con
+    ///         số này bằng bao nhiêu. Nó chỉ có ý nghĩa khi tăng dần không ngừng — dấu hiệu
+    ///         plugin đang giữ chặt chính nó (thường do subscribe sự kiện Revit mà không nhả).
+    ///     </para>
+    /// </summary>
+    int CountStaleLoads(int slotIndex);
 }
 
-/// <summary>Kết quả gỡ một plugin — phân biệt "nền tảng không hỗ trợ" với "gỡ không được".</summary>
+/// <summary>Kết quả gỡ một plugin.</summary>
 internal enum UnloadResult
 {
     /// <summary>Slot chưa nạp gì, không có việc gì để làm.</summary>
     NothingLoaded,
 
-    /// <summary>AssemblyLoadContext đã chết hẳn, lần nạp sau là bản hoàn toàn mới.</summary>
-    Released,
-
     /// <summary>
-    ///     Đã gọi <c>Unload()</c> nhưng context vẫn còn sống — plugin đang bị giữ chặt
-    ///     (thường do subscribe <c>Idling</c>/<c>DocumentOpened</c> mà không nhả). Code cũ
-    ///     vẫn nằm trong tiến trình; chỉ restart Revit mới sạch.
+    ///     Đã yêu cầu gỡ. Lần nạp kế tiếp chắc chắn là assembly mới; việc GC thu hồi bản cũ
+    ///     xảy ra sau đó, theo nhịp của chính GC.
     /// </summary>
-    StillAlive,
+    Requested,
 
     /// <summary>
-    ///     .NET Framework không có collectible AssemblyLoadContext nên không bao giờ gỡ
-    ///     thật được. Đây là giới hạn nền tảng đã biết, KHÔNG phải lỗi — mỗi lần reload nạp
-    ///     một assembly mới và bản cũ nằm lại (rò rỉ nhẹ, chấp nhận được khi dev).
+    ///     .NET Framework không có collectible AssemblyLoadContext nên không bao giờ gỡ thật
+    ///     được. Đây là giới hạn nền tảng đã biết, KHÔNG phải lỗi — mỗi lần reload nạp một
+    ///     assembly mới và bản cũ nằm lại (rò rỉ nhẹ, chấp nhận được khi dev).
     /// </summary>
     NotSupported
 }
