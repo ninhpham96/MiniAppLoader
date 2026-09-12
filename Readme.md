@@ -138,6 +138,8 @@ Chạy thật qua [rvt-mcp](https://github.com/bimwright/rvt-mcp), không dừng
 | Ribbon của add-in khác còn nguyên sau reload | ✅ | ✅ |
 | Thêm / gỡ / tái dùng slot | — | ✅ |
 | Dependency riêng của plugin | ✅ (xem giới hạn) | ✅ |
+| `IHotCommand` — tự chạy lại sau build, không chạm chuột | — | ✅ (2 vòng, ~540 ms sau khi build xong) |
+| Kéo-thả DLL từ Explorer vào pane | — | ✅ (kể cả nhánh từ chối DLL không có entry point) |
 
 ### Nhánh lỗi (Revit 2026)
 
@@ -176,8 +178,7 @@ khung nhật ký và file log.
 
 Build sạch, 0 warning, trên cả 6 configuration `R22`…`R27`.
 
-**Chưa kiểm chứng:** kéo-thả DLL vào pane (cần OLE drag source, không tự động hoá gọn được),
-`IHotCommand`, hai field override `ribbonTabsToRemove`/`ribbonPanelsToRemove`, và vòng
+**Chưa kiểm chứng:** hai field override `ribbonTabsToRemove`/`ribbonPanelsToRemove`, và vòng
 hot-reload `kind: Command` đầy đủ trên net48. Revit 2023/2025/2027 chỉ build qua NuGet —
 máy phát triển không cài. Bộ cài MSI mới chỉ soi cấu trúc bên trong, chưa cài thử.
 
@@ -239,6 +240,7 @@ cũ còn sót lại, chứ add-in không chết.
 source/MiniAppLoader/   add-in
 samples/SamplePlugin/         plugin mẫu kind=Command (multi-target net48 + net8)
 samples/SampleApplication/    plugin mẫu kind=Application, tự dựng tab riêng
+samples/SampleHotCommand/     plugin mẫu implement IHotCommand — tự chạy lại sau build
 build/                  ModularPipelines: compile, đóng gói, publish
 install/                WixSharp — sinh MSI
 ```
@@ -252,8 +254,14 @@ dotnet run --project build -- pack
 Tự cài `wix` tool, publish toàn bộ configuration `Release.Rxx`, rồi sinh MSI vào `output/`.
 Đặt `Build.Version` trong `build/appsettings.json`; để trống thì dùng GitVersion.
 
-Hai plugin mẫu trong `samples/` dùng để thử loader: chúng ghi mốc ra file thay vì bật dialog,
+Các plugin mẫu trong `samples/` dùng để thử loader: chúng ghi mốc ra file thay vì bật dialog,
 vì dialog là modal và sẽ chặn Revit khiến mọi kiểm chứng tự động treo.
+
+`SampleHotCommand` là ngoại lệ duy nhất phải build **sau** add-in: nó tham chiếu
+`MiniAppLoader.dll` để lấy interface `IHotCommand`, nên cố ý KHÔNG nằm trong
+`samples/Samples.sln` — `build -- pack` xoá sạch `bin/` và sẽ làm gãy solution mẫu.
+Tham chiếu đó đặt `Private=false`: loader tìm entry point bằng `Type.IsAssignableFrom`,
+nên plugin phải thấy đúng instance assembly host đã nạp, không phải bản copy.
 
 ---
 
