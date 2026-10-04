@@ -1,6 +1,7 @@
 #if NET8_0_OR_GREATER
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -12,7 +13,7 @@ namespace MiniAppLoader.Core.Runtime;
 ///     Một <see cref="AssemblyLoadContext"/> collectible riêng cho MỖI plugin (không dùng
 ///     chung một context cho tất cả), để reload/unload plugin A không đụng tới plugin B.
 /// </summary>
-internal sealed class PluginLoadContext(string pluginDllPath) : AssemblyLoadContext(isCollectible: true)
+internal sealed class PluginLoadContext(string pluginDllPath, int slotIndex) : AssemblyLoadContext(isCollectible: true)
 {
     /// <summary>
     ///     Đọc <c>&lt;TênPlugin&gt;.deps.json</c> nằm cạnh DLL để biết plugin kéo theo NuGet
@@ -54,8 +55,20 @@ internal sealed class PluginLoadContext(string pluginDllPath) : AssemblyLoadCont
         // chỉ trả về path cho thứ plugin thật sự ship; assembly của framework không nằm trong
         // đó, trả null và runtime tự lo qua Default như bình thường.
         var path = _resolver.ResolveAssemblyToPath(assemblyName);
-        return path is null ? null : LoadFromAssemblyPath(path);
+        if (path is null) return null;
+
+        // Dependency nằm NGAY trong thư mục output của plugin cũng phải đi qua bản shadow, giống
+        // DLL chính. Nạp thẳng từ đó thì file bị khoá cho tới hết phiên, và bước build của chính
+        // plugin (ILRepack của template Nice3point gom rồi XOÁ các dll phụ thuộc trong bin) thất
+        // bại với "Unable to delete file ...Toolkit.dll". Dependency ở nơi khác (NuGet cache) thì
+        // không ai build đè lên, cứ nạp thẳng.
+        if (IsInPluginDirectory(path)) path = ShadowCopy.Create(path, $"slot{slotIndex}");
+
+        return LoadFromAssemblyPath(path);
     }
+
+    private bool IsInPluginDirectory(string path) => string.Equals(
+        Path.GetDirectoryName(path), Path.GetDirectoryName(pluginDllPath), StringComparison.OrdinalIgnoreCase);
 
     public Assembly LoadPlugin(string dllPath, int slotIndex)
     {
@@ -95,7 +108,7 @@ internal sealed class AlcPluginRuntime : IPluginRuntime
 
         _dllPaths[slot.Index] = slot.DllPath;
 
-        var context = new PluginLoadContext(slot.DllPath);
+        var context = new PluginLoadContext(slot.DllPath, slot.Index);
         _contexts[slot.Index] = context;
 
         return context.LoadPlugin(slot.DllPath, slot.Index);

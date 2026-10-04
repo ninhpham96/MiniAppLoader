@@ -5,28 +5,39 @@ using System.Threading;
 namespace MiniAppLoader.Core.Runtime;
 
 /// <summary>
-///     Copy DLL (+ .pdb nếu có) ra một bản "shadow" trong subfolder <c>~shadow\</c> nằm cạnh
-///     bản gốc, rồi nạp từ bản shadow đó.
+///     Copy DLL (+ .pdb nếu có) thành một bản "shadow" đặt ngay CẠNH bản gốc
+///     (<c>Tên~slot0.shadow</c>), rồi nạp từ bản shadow đó.
 ///     <para>
 ///         <b>Vì sao không nạp thẳng từ byte[] / stream:</b> nạp từ bộ nhớ đúng là không khoá
 ///         file gốc (đúng mục tiêu hot-reload), NHƯNG khiến <c>Assembly.Location</c> trả về
 ///         CHUỖI RỖNG — đây là hành vi chuẩn của .NET, không phải bug. Rất nhiều plugin thật
 ///         dùng <c>Assembly.GetExecutingAssembly().Location</c> để tự tìm thư mục chứa mình
-///         (đọc config, ảnh, PDF…) và sẽ ném <c>ArgumentException</c> ngay trong
-///         <c>OnStartup</c> khi gặp chuỗi rỗng.
+///         (đọc config, ảnh, PDF, DLL anh em…) và sẽ ném lỗi ngay trong <c>OnStartup</c>.
 ///     </para>
 ///     <para>
-///         <b>Đánh đổi đã biết và chấp nhận:</b> vì bản shadow nằm trong <c>~shadow\</c>,
-///         <c>Location</c> của plugin trỏ vào thư mục con đó chứ KHÔNG phải thư mục output
-///         thật. Plugin nào dùng <c>Location</c> để tìm resource nằm cạnh nó sẽ tìm sai chỗ.
-///         Không có cách vẹn cả đôi đường: CLR luôn báo <c>Location</c> = đường dẫn vật lý đã
-///         nạp. Các plugin-loader hot-reload khác (Prise, McMaster…) xử lý bằng cách không
-///         dựa vào <c>Location</c> trong plugin và tài liệu hoá rõ giới hạn, thay vì cố lừa CLR.
+///         <b>Vì sao đặt cạnh bản gốc mà không phải thư mục con:</b> bản đầu để shadow trong
+///         <c>~shadow\</c>, nên <c>Location</c> trỏ vào thư mục con đó và mọi đường dẫn tương
+///         đối của plugin (DLL anh em, <c>Resources\</c>, thư mục cha…) đều lệch. Đặt cạnh bản
+///         gốc thì <c>Location</c> nằm đúng thư mục output thật. Cái giá là vài file
+///         <c>*~slotN.shadow/.pdb</c> trong thư mục output, được dọn ở lần mở Revit sau.
 ///     </para>
 /// </summary>
 internal static class ShadowCopy
 {
+    /// <summary>Thư mục shadow của các bản cũ — không còn tạo nữa, nhưng vẫn dọn rác nó để lại.</summary>
     private const string ShadowDirName = "~shadow";
+
+    /// <summary>Dấu trong tên file shadow đặt CẠNH DLL gốc: <c>Tên~slot0.shadow</c> (hoặc <c>Tên~slot-GUID.shadow</c>).</summary>
+    private const string SiblingMarker = "~slot";
+
+    /// <summary>
+    ///     Đuôi của bản shadow cạnh DLL gốc — cố ý KHÔNG phải <c>.dll</c>. Các bước build hay quét
+    ///     <c>*.dll</c> trong thư mục output (ILRepack của template Nice3point gom MỌI dll ở đó
+    ///     thành một); thấy <c>Tên~slot0.dll</c> là nó nhét luôn bản trùng này vào rồi build hỏng.
+    ///     CLR nạp assembly từ đường dẫn bất kể đuôi file gì, và pdb vẫn đi theo tên
+    ///     (<c>Tên~slot0.pdb</c>).
+    /// </summary>
+    private const string SiblingExtension = ".shadow";
 
     /// <summary>
     ///     Tạo bản shadow của <paramref name="dllPath"/> và trả về đường dẫn của nó.
@@ -38,11 +49,14 @@ internal static class ShadowCopy
     /// </param>
     public static string Create(string dllPath, string? preferredSuffix = null)
     {
-        var directory = Path.GetDirectoryName(dllPath)!;
-        var shadowDirectory = Path.Combine(directory, ShadowDirName);
-        Directory.CreateDirectory(shadowDirectory);
+        var shadowDirectory = Path.GetDirectoryName(dllPath)!;
 
-        var shadowDll = Path.Combine(shadowDirectory, (preferredSuffix ?? Guid.NewGuid().ToString("N")) + ".dll");
+        // Tên phải luôn chứa SiblingMarker để CleanupSiblings nhận ra và dọn được; bản dự
+        // phòng tên GUID cũng vậy.
+        string ShadowName(string suffix) =>
+            Path.GetFileNameWithoutExtension(dllPath) + "~" + (suffix.StartsWith("slot", StringComparison.Ordinal) ? suffix : "slot-" + suffix) + SiblingExtension;
+
+        var shadowDll = Path.Combine(shadowDirectory, ShadowName(preferredSuffix ?? Guid.NewGuid().ToString("N")));
 
         try
         {
@@ -51,7 +65,7 @@ internal static class ShadowCopy
         catch (Exception exception) when (preferredSuffix is not null && IsFileLocked(exception))
         {
             // Bản shadow cũ chưa được giải phóng xong -> dùng tên GUID để không kẹt.
-            shadowDll = Path.Combine(shadowDirectory, Guid.NewGuid().ToString("N") + ".dll");
+            shadowDll = Path.Combine(shadowDirectory, ShadowName(Guid.NewGuid().ToString("N")));
             File.Copy(dllPath, shadowDll, overwrite: true);
         }
 
@@ -80,12 +94,18 @@ internal static class ShadowCopy
     ///     sót từ PHIÊN TRƯỚC — lúc đó chắc chắn không file nào đang bị phiên hiện tại khoá,
     ///     nên dọn được cả rác net48 để lại (net48 không unload được nên chỉ dọn được kiểu này).
     /// </summary>
-    public static void CleanupDirectory(string? directory, string? exceptPath = null)
+    /// <returns>
+    ///     <see langword="true"/> nếu sau khi dọn vẫn còn rác (file đang bị khoá) — phía gọi nên
+    ///     nhớ thư mục này để dọn tiếp ở lần sau.
+    /// </returns>
+    public static bool CleanupDirectory(string? directory, string? exceptPath = null)
     {
-        if (string.IsNullOrEmpty(directory)) return;
+        if (string.IsNullOrEmpty(directory)) return false;
+
+        var leftovers = CleanupSiblings(directory!, exceptPath);
 
         var shadowDirectory = Path.Combine(directory!, ShadowDirName);
-        if (!Directory.Exists(shadowDirectory)) return;
+        if (!Directory.Exists(shadowDirectory)) return leftovers;
 
         foreach (var file in Directory.EnumerateFiles(shadowDirectory))
         {
@@ -96,11 +116,46 @@ internal static class ShadowCopy
         try
         {
             if (Directory.GetFileSystemEntries(shadowDirectory).Length == 0) Directory.Delete(shadowDirectory);
+            else leftovers = true;
         }
         catch (Exception exception) when (IsFileLocked(exception))
         {
             // Còn file bị khoá bên trong, hoặc đua với một lần Create khác — bỏ qua.
+            leftovers = true;
         }
+
+        return leftovers;
+    }
+
+    /// <summary>
+    ///     Dọn các bản shadow đặt cạnh DLL gốc (<c>*~slotN.shadow/.pdb</c>), kể cả <c>*~slotN.dll</c>
+    ///     do bản trước tạo ra.
+    /// </summary>
+    private static bool CleanupSiblings(string directory, string? exceptPath)
+    {
+        var leftovers = false;
+        if (!Directory.Exists(directory)) return leftovers;
+
+        foreach (var file in Directory.EnumerateFiles(directory, "*" + SiblingMarker + "*"))
+        {
+            var extension = Path.GetExtension(file);
+            if (!extension.Equals(SiblingExtension, StringComparison.OrdinalIgnoreCase) &&
+                !extension.Equals(".dll", StringComparison.OrdinalIgnoreCase) &&
+                !extension.Equals(".pdb", StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (string.Equals(file, exceptPath, StringComparison.OrdinalIgnoreCase)) continue;
+
+            try
+            {
+                File.Delete(file);
+            }
+            catch (Exception exception) when (IsFileLocked(exception))
+            {
+                leftovers = true; // còn bị khoá, để lần sau
+            }
+        }
+
+        return leftovers;
     }
 
     /// <summary>

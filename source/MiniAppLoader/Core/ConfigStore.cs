@@ -135,6 +135,41 @@ public sealed class ConfigStore(string revitVersion, string? legacyConfigPath = 
         }
     }
 
+    /// <summary>
+    ///     Danh sách thư mục từng chứa bản shadow của plugin. Lưu riêng vì plugin bị gỡ khỏi
+    ///     <c>plugins.json</c> thì không còn gì nhắc tới thư mục của nó, nhưng rác shadow (đang bị
+    ///     khoá lúc đó) vẫn nằm lại và cần dọn ở phiên sau. Không bao giờ ném.
+    /// </summary>
+    public List<string> LoadShadowDirectories()
+    {
+        try
+        {
+            return File.Exists(ShadowDirectoriesPath)
+                ? JsonSerializer.Deserialize<List<string>>(File.ReadAllText(ShadowDirectoriesPath)) ?? []
+                : [];
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Không đọc được {Path} — bỏ qua danh sách thư mục shadow", ShadowDirectoriesPath);
+            return [];
+        }
+    }
+
+    public void SaveShadowDirectories(IEnumerable<string> directories)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ShadowDirectoriesPath)!);
+            File.WriteAllText(ShadowDirectoriesPath, JsonSerializer.Serialize(directories.ToList(), WriteOptions));
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Không ghi được {Path}", ShadowDirectoriesPath);
+        }
+    }
+
+    private string ShadowDirectoriesPath => Path.Combine(Path.GetDirectoryName(ConfigPath)!, "shadow-dirs.json");
+
     /// <summary>Ghi config theo kiểu ghi-tạm-rồi-thay, để không để lại file rỗng khi Revit crash giữa chừng.</summary>
     public void Save(IEnumerable<PluginEntry> entries)
     {
