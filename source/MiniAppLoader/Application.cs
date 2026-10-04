@@ -82,11 +82,15 @@ public class Application : ExternalApplication
     {
         var hubPanel = Application.CreatePanel("Hub", TabName);
 
-        hubPanel.AddPushButton<ShowHubCommand>("Plugin\nHub")
+        var hubButton = hubPanel.AddPushButton<ShowHubCommand>("Plugin\nHub")
             .SetImage("/MiniAppLoader;component/Resources/Icons/RibbonIcon16-light.png")
             .SetLargeImage("/MiniAppLoader;component/Resources/Icons/RibbonIcon32-light.png")
             .SetToolTip("Bật/tắt bảng quản lý plugin")
             .SetLongDescription("Thêm, nạp lại, chạy và gỡ plugin mà không cần khởi động lại Revit.");
+
+        // Nút này luôn hiện nên post được; ShowHubCommand nhận thêm việc chạy command của plugin
+        // Application khi có yêu cầu đang chờ.
+        PluginHost.Current.Slots.UseAsDispatchCarrier(hubButton);
 
         // Panel nút plugin: toàn bộ nút được tạo sẵn rồi ẩn, không tạo thêm lúc chạy.
         // Xem SlotPool để biết vì sao.

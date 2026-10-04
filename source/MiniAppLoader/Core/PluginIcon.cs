@@ -48,6 +48,31 @@ internal static class PluginIcon
         return (Generate(entry, 16), Generate(entry, 32));
     }
 
+    /// <summary>
+    ///     Ghi icon mặc định (vòng tròn màu + chữ cái đầu của <paramref name="label"/>) ra
+    ///     <paramref name="path"/> — dùng khi plugin đòi một file ảnh không tồn tại. Tạo luôn
+    ///     thư mục còn thiếu. Trả về <see langword="false"/> nếu không ghi được.
+    /// </summary>
+    public static bool TryWritePlaceholder(string path, string label)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create((BitmapSource)Generate(new PluginEntry { Id = label, ButtonText = label }, 32)));
+
+            using var stream = File.Create(path);
+            encoder.Save(stream);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Không tạo được icon mặc định tại '{Path}'", path);
+            return false;
+        }
+    }
+
     private static string? ResolvePath(PluginEntry entry)
     {
         if (!string.IsNullOrWhiteSpace(entry.IconPath))

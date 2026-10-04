@@ -34,6 +34,7 @@ public sealed class SlotPool
 
     private readonly PushButton?[] _buttons = new PushButton?[MaxSlots];
     private readonly string?[] _commandIds = new string?[MaxSlots];
+    private string? _dispatchCommandId;
     private readonly ObservableCollection<PluginSlot> _slots = [];
 
     public SlotPool()
@@ -78,7 +79,20 @@ public sealed class SlotPool
         }
 
         CanPostCommands = verified == MaxSlots;
+
     }
+
+    /// <summary>
+    ///     Chọn nút làm "xe chở" cho việc chạy command của plugin Application từ bản mới nhất
+    ///     (xem <c>RibbonCommandRedirect</c>). Phải là nút LUÔN HIỆN: Revit từ chối
+    ///     <c>PostCommand</c> tới nút ẩn với "cannot be invoked in this context" — đã gặp thật khi
+    ///     thử một nút điều phối riêng đặt <c>Visible = false</c>.
+    /// </summary>
+    public void UseAsDispatchCarrier(RibbonItem button)
+        => _dispatchCommandId = RibbonIds.TryGetVerifiedCommandId(button);
+
+    /// <summary>ID lệnh để <c>PostCommand</c> điều phối; <see langword="null"/> nếu không tra được.</summary>
+    public string? DispatchCommandId => _dispatchCommandId;
 
     /// <summary>Slot trống đầu tiên, hoặc <see langword="null"/> nếu đã dùng hết pool.</summary>
     public PluginSlot? TakeFreeSlot() => _slots.FirstOrDefault(slot => slot.IsFree);

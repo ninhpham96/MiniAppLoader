@@ -30,6 +30,22 @@ internal static class RibbonIds
         .GetField("m_RibbonItem", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
 
     /// <summary>
+    ///     Object <c>Autodesk.Windows.RibbonItem</c> thật bên dưới <paramref name="item"/>, hoặc
+    ///     <see langword="null"/> nếu kỹ thuật reflection không còn đúng.
+    /// </summary>
+    public static object? TryGetInternalItem(RibbonItem item)
+    {
+        try
+        {
+            return InternalItemField?.GetValue(item);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     ///     Trả về ID nội bộ của <paramref name="item"/>, hoặc <see langword="null"/> nếu
     ///     kỹ thuật reflection không còn đúng trên version Revit đang chạy.
     /// </summary>

@@ -35,6 +35,29 @@ internal sealed class PluginLoader
 
     private readonly Dictionary<int, Assembly> _assemblies = [];
 
+    /// <summary>Dấu vết (giờ ghi + kích thước) của DLL gốc tại lần nạp gần nhất của từng slot.</summary>
+    private readonly Dictionary<int, (DateTime WrittenUtc, long Length)> _loadedStamps = [];
+
+    /// <summary>
+    ///     <see langword="true"/> khi slot chưa nạp lần nào hoặc DLL gốc đã đổi kể từ lần nạp
+    ///     gần nhất. Dùng để KHÔNG nạp lại vô ích mỗi lần bấm nút: mỗi lần nạp là một bản shadow
+    ///     mới, một ALC mới và một bản cũ chờ GC.
+    /// </summary>
+    public bool NeedsReload(PluginSlot slot)
+    {
+        if (!_assemblies.ContainsKey(slot.Index) || !_loadedStamps.TryGetValue(slot.Index, out var stamp)) return true;
+
+        try
+        {
+            var info = new FileInfo(slot.DllPath);
+            return !info.Exists || info.LastWriteTimeUtc != stamp.WrittenUtc || info.Length != stamp.Length;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>
     ///     Instance <c>IExternalApplication</c> đang chạy của các slot Kind=Application, cùng
     ///     bản <see cref="UIControlledApplication"/> đã trao cho nó.
@@ -73,6 +96,7 @@ internal sealed class PluginLoader
         // bản cũ là ctx.Unload() + GC.Collect không bao giờ thu được — slot sẽ báo "Leaked"
         // dù plugin hoàn toàn sạch. Đã gặp thật khi test trên Revit 2026.
         _assemblies.Remove(slot.Index);
+        _loadedStamps.Remove(slot.Index);
 
         _runtime.Unload(slot.Index);
 
@@ -92,6 +116,9 @@ internal sealed class PluginLoader
 
         _assemblies[slot.Index] = assembly;
 
+        var loadedInfo = new FileInfo(slot.DllPath);
+        _loadedStamps[slot.Index] = (loadedInfo.LastWriteTimeUtc, loadedInfo.Length);
+
         stopwatch.Stop();
         slot.LastLoadedAt = DateTime.Now;
         slot.LastLoadDuration = stopwatch.Elapsed;
@@ -107,15 +134,46 @@ internal sealed class PluginLoader
         return assembly;
     }
 
+    /// <summary>Đường dẫn file của assembly đang nạp cho slot (bản shadow), hoặc null nếu chưa nạp.</summary>
+    public string? LoadedLocation(PluginSlot slot)
+        => _assemblies.TryGetValue(slot.Index, out var assembly) ? assembly.Location : null;
+
     /// <summary>Tạo instance <c>IExternalCommand</c> của plugin từ assembly đang nạp.</summary>
     public IExternalCommand CreateCommand(PluginSlot slot, string? preferredClassName)
     {
         var assembly = _assemblies[slot.Index];
+
+        // Slot gắn với một command cụ thể (DLL nhiều command) mà class đó đã biến mất sau
+        // build thì phải báo lỗi — lẳng lặng chạy class đầu tiên sẽ khiến nút "B" chạy lệnh "A".
+        if (!string.IsNullOrEmpty(preferredClassName) &&
+            !FindAllEntryPoints(assembly, typeof(IExternalCommand)).Any(candidate => candidate.FullName == preferredClassName))
+        {
+            throw new InvalidOperationException(
+                $"Không còn class '{preferredClassName}' trong {assembly.GetName().Name} — đã đổi tên hoặc xoá? " +
+                "Gỡ plugin rồi thêm lại để quét lại danh sách command.");
+        }
+
         var type = FindEntryPoint(assembly, typeof(IExternalCommand), preferredClassName)
                    ?? throw new InvalidOperationException(
                        $"Không tìm thấy class nào implement IExternalCommand trong {assembly.GetName().Name}.");
 
         return (IExternalCommand)Activator.CreateInstance(type)!;
+    }
+
+    /// <summary>
+    ///     Liệt kê entry point trong assembly đang nạp của slot: có <c>IExternalApplication</c>
+    ///     hay không, và FullName của MỌI class <c>IExternalCommand</c>. Dùng khi thêm DLL để
+    ///     quyết định tạo tab riêng (Application) hay một nút cho mỗi command.
+    /// </summary>
+    public (bool HasApplication, IReadOnlyList<(string FullName, string Name)> Commands) Discover(PluginSlot slot)
+    {
+        var assembly = _assemblies[slot.Index];
+        var hasApplication = FindEntryPoint(assembly, typeof(IExternalApplication), preferredClassName: null) is not null;
+        var commands = FindAllEntryPoints(assembly, typeof(IExternalCommand))
+            .Select(type => (type.FullName ?? type.Name, type.Name))
+            .ToList();
+
+        return (hasApplication, commands);
     }
 
     /// <summary>Instance <see cref="IHotCommand"/> nếu plugin có, để tự chạy lại sau build.</summary>
@@ -138,25 +196,143 @@ internal sealed class PluginLoader
                    ?? throw new InvalidOperationException(
                        $"Không tìm thấy class nào implement IExternalApplication trong {assembly.GetName().Name}.");
 
-        var instance = (IExternalApplication)Activator.CreateInstance(type)!;
-
         // Giữ controlled app TRƯỚC khi gọi OnStartup: nếu OnStartup ném, lần reload sau vẫn
         // phải gỡ được phần ribbon plugin kịp dựng, mà gỡ thì cần đúng object này.
         _controlled[slot.Index] = controlled;
 
         var before = RibbonDiff.Snapshot();
+
+        PreloadIntoDefaultContext(assembly, slot);
+
+        // Plugin hay hỏng OnStartup vì thiếu file icon (thư mục output không kèm Resources).
+        // Gặp vậy thì tạo icon mặc định đúng chỗ plugin tìm rồi chạy lại OnStartup — mỗi lượt
+        // vá được một file, nên lặp cho tới khi hết file thiếu (có trần để khỏi lặp vô hạn).
+        for (var attempt = 0; ; attempt++)
+        {
+            var instance = (IExternalApplication)Activator.CreateInstance(type)!;
+            var retrying = false;
+
+            try
+            {
+                instance.OnStartup(controlled);
+                _applications[slot.Index] = (instance, controlled);
+                return;
+            }
+            catch (Exception exception)
+            {
+                // Chỉ vá file nằm trong thư mục của plugin: đó là chỗ Resources lẽ ra phải ở,
+                // và không để loader tạo file ở nơi tuỳ ý trên đĩa chỉ vì plugin dò một đường dẫn.
+                var missing = attempt < MaxIconRepairs ? FindMissingImagePath(exception) : null;
+                if (missing is null || !IsUnder(Path.GetDirectoryName(slot.DllPath), missing) || !PluginIcon.TryWritePlaceholder(missing, Path.GetFileNameWithoutExtension(missing))) throw;
+
+                Log.Warning("'{Id}' thiếu file ảnh '{Path}' — đã tạo icon mặc định, chạy lại OnStartup",
+                    slot.Id, missing);
+
+                // Gỡ phần ribbon plugin kịp dựng dở để OnStartup lượt sau không báo trùng tên.
+                RibbonDiff.RemoveAdded(controlled, before, RibbonDiff.Snapshot(), [], []);
+                retrying = true;
+            }
+            finally
+            {
+                // Chụp cả khi OnStartup ném. Plugin thường đã dựng xong tab + vài panel rồi mới
+                // hỏng ở panel tiếp theo; không ghi lại thì phần đã dựng thành rác vĩnh viễn và
+                // mọi lần nạp sau đều ném "The tab with the input name exists already".
+                // Riêng lượt sắp chạy lại thì chưa chụp: ribbon vừa được dọn sạch.
+                if (!retrying) _ribbonSnapshots[slot.Index] = (before, RibbonDiff.Snapshot());
+            }
+        }
+    }
+
+    private const int MaxIconRepairs = 50;
+
+    /// <summary>
+    ///     Nạp sẵn assembly của plugin Application vào context MẶC ĐỊNH của Revit, để nút ribbon
+    ///     của nó bấm được.
+    ///     <para>
+    ///         Revit chạy command của một nút bằng cách nạp assembly theo TÊN vào context mặc
+    ///         định. Khi chưa có gì trong đó, lời gọi rơi xuống các handler <c>AssemblyResolve</c>
+    ///         có sẵn của Autodesk (<c>RevitPnIDIteropRibbonPanel</c>,
+    ///         <c>FabPartBrowserApplication</c>…) — chúng quét mọi assembly đang nạp trong process,
+    ///         kể cả bản trong ALC collectible của loader, rồi trả về chính bản đó. Đưa một
+    ///         assembly collectible vào context mặc định thì .NET ném
+    ///         <c>"Operation is not supported (0x80131515)"</c>, và nút ribbon bấm không phản ứng
+    ///         gì. Đã tái hiện bằng <c>Assembly.Load("Test1")</c> trong Revit 2026 — và sau khi nạp
+    ///         sẵn thì cùng nút đó chạy.
+    ///     </para>
+    ///     <para>
+    ///         Hệ quả phải chấp nhận: command của plugin Application chạy từ bản đầu tiên Revit nạp
+    ///         và KHÔNG đổi khi reload — chỉ phần OnStartup/ribbon trong ALC được làm mới. Đây không
+    ///         phải do cách nạp sẵn này: đã thử trả bản mới nhất qua
+    ///         <c>AssemblyLoadContext.Default.Resolving</c> (ALC không collectible) thì Revit vẫn nhớ
+    ///         assembly theo tên từ lần nạp đầu và chạy bản cũ. Add-in Revit thường cũng vậy; muốn
+    ///         code command mới phải mở lại Revit, hoặc dùng plugin Command (nạp lại được).
+    ///     </para>
+    /// </summary>
+    private static void PreloadIntoDefaultContext(Assembly assembly, PluginSlot slot)
+    {
+#if NET8_0_OR_GREATER
         try
         {
-            instance.OnStartup(controlled);
-            _applications[slot.Index] = (instance, controlled);
+            // Một identity chỉ nạp được MỘT lần vào context mặc định (LoadFrom ném "Assembly with
+            // same name is already loaded" nếu nạp thêm bản thứ hai). Lần reload thứ hai trở đi
+            // đã có bản đầu tiên ở đó, và command của nút sẽ tiếp tục chạy bản đó.
+            var name = assembly.GetName().Name;
+            if (System.Runtime.Loader.AssemblyLoadContext.Default.Assemblies.Any(loaded => loaded.GetName().Name == name))
+            {
+                Log.Warning("'{Id}': ribbon đã dựng lại, nhưng code của các nút vẫn là bản nạp lần đầu — " +
+                            "mở lại Revit để chạy bản build mới", slot.Id);
+                return;
+            }
+
+            Assembly.LoadFrom(assembly.Location);
         }
-        finally
+        catch (Exception exception)
         {
-            // Chụp cả khi OnStartup ném. Plugin thường đã dựng xong tab + vài panel rồi mới
-            // hỏng ở panel tiếp theo; không ghi lại thì phần đã dựng thành rác vĩnh viễn và
-            // mọi lần nạp sau đều ném "The tab with the input name exists already".
-            _ribbonSnapshots[slot.Index] = (before, RibbonDiff.Snapshot());
+            Log.Warning(exception,
+                "'{Id}': không nạp sẵn được assembly vào context mặc định — nút ribbon của plugin có thể bấm không chạy",
+                slot.Id);
         }
+#endif
+    }
+
+    private static bool IsUnder(string? directory, string path)
+    {
+        if (string.IsNullOrEmpty(directory)) return false;
+
+        var root = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".ico"];
+
+    /// <summary>
+    ///     Đường dẫn file ảnh mà exception (hoặc inner của nó) báo là không tồn tại, hoặc
+    ///     <see langword="null"/> nếu lỗi này không phải do thiếu ảnh.
+    /// </summary>
+    private static string? FindMissingImagePath(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            string? path = null;
+
+            if (current is FileNotFoundException { FileName: { } fileName }) path = fileName;
+            else if (current is DirectoryNotFoundException or FileNotFoundException)
+            {
+                // Thông báo dạng "Could not find a part of the path 'X'." / "Could not find file 'X'."
+                var message = current.Message;
+                var start = message.IndexOf('\'');
+                var end = message.LastIndexOf('\'');
+                if (start >= 0 && end > start) path = message.Substring(start + 1, end - start - 1);
+            }
+
+            if (path is not null && Path.IsPathRooted(path) &&
+                ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+            {
+                return path;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -213,6 +389,7 @@ internal sealed class PluginLoader
     public UnloadResult Unload(PluginSlot slot)
     {
         _assemblies.Remove(slot.Index);
+        _loadedStamps.Remove(slot.Index);
         _controlled.Remove(slot.Index);
         return _runtime.Unload(slot.Index);
     }
@@ -233,6 +410,18 @@ internal sealed class PluginLoader
     /// </summary>
     private static Type? FindEntryPoint(Assembly assembly, Type contract, string? preferredClassName)
     {
+        var candidates = FindAllEntryPoints(assembly, contract);
+
+        if (!string.IsNullOrEmpty(preferredClassName))
+        {
+            return candidates.FirstOrDefault(type => type.FullName == preferredClassName) ?? candidates.FirstOrDefault();
+        }
+
+        return candidates.FirstOrDefault();
+    }
+
+    private static List<Type> FindAllEntryPoints(Assembly assembly, Type contract)
+    {
         Type[] types;
         try
         {
@@ -245,15 +434,8 @@ internal sealed class PluginLoader
             types = exception.Types.Where(type => type is not null).ToArray()!;
         }
 
-        var candidates = types
+        return types
             .Where(type => contract.IsAssignableFrom(type) && type is { IsAbstract: false, IsInterface: false })
             .ToList();
-
-        if (!string.IsNullOrEmpty(preferredClassName))
-        {
-            return candidates.FirstOrDefault(type => type.FullName == preferredClassName) ?? candidates.FirstOrDefault();
-        }
-
-        return candidates.FirstOrDefault();
     }
 }
