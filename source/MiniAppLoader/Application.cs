@@ -30,7 +30,7 @@ namespace MiniAppLoader;
 [UsedImplicitly]
 public class Application : ExternalApplication
 {
-    private const string TabName = "MiniApps";
+    private const string TabName = "MiniAppLoader";
 
     private PluginHubView? _hubView;
 

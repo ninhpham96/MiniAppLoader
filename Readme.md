@@ -3,7 +3,7 @@
 Nạp và **hot-reload plugin Revit trong lúc Revit đang chạy** — sửa code, build, bấm nút,
 thấy kết quả ngay, không restart Revit.
 
-Viết lại từ [ninhpham96/AutoLoadAddin](https://github.com/ninhpham96/AutoLoadAddin) trên
+Viết lại từ bản MiniAppLoader đầu tiên trên
 scaffold [Nice3point.Revit.Templates](https://github.com/Nice3point/RevitTemplates) đầy đủ:
 giữ nguyên năng lực loader, thay UI bằng **dockable pane**, và bổ sung bộ cài MSI.
 
