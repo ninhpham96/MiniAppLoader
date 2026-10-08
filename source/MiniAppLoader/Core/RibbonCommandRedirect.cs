@@ -1,4 +1,3 @@
-#if NET8_0_OR_GREATER
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -14,7 +13,7 @@ namespace MiniAppLoader.Core;
 ///     tự tạo, để mỗi lần bấm chạy code MỚI NHẤT của plugin thay vì bản Revit đã nhớ từ lần nạp
 ///     đầu.
 ///     <para>
-///         <b>Vì sao cần:</b> trên Revit 2025+ (.NET 8), Revit nạp assembly của command theo tên
+///         <b>Vì sao cần:</b> trên Revit, Revit nạp assembly của command theo tên
 ///         vào context mặc định và giữ bản đầu tiên cho cả phiên. Loader dựng lại được ribbon sau
 ///         mỗi lần build, nhưng nút bấm vẫn chạy bản cũ. Đã đo trực tiếp trên Revit 2026: nạp
 ///         sẵn bản mới vào context mặc định hay trả nó qua <c>AssemblyLoadContext.Resolving</c>
@@ -34,14 +33,14 @@ namespace MiniAppLoader.Core;
 /// </summary>
 internal static class RibbonCommandRedirect
 {
-    /// <summary>Gắn bộ chuyển hướng cho mọi nút thuộc <paramref name="assemblyPath"/>. Trả về số nút đã gắn.</summary>
+    /// <summary>Gắn bộ chuyển hướng cho mọi nút thuộc một trong <paramref name="assemblyPaths"/> (bản shadow lẫn DLL gốc — plugin thường trỏ nút vào DLL gốc cạnh thư mục của nó). Trả về số nút đã gắn.</summary>
     /// <param name="dispatch">
     ///     Nhận tên class command; trả về <see langword="false"/> nếu không chuyển được, khi đó
     ///     nút chạy theo đường mặc định của Revit.
     /// </param>
-    public static int Attach(UIControlledApplication application, string assemblyPath, Func<string, bool> dispatch)
+    public static int Attach(UIControlledApplication application, IReadOnlyCollection<string> assemblyPaths, Func<string, bool> dispatch)
     {
-        var target = Normalize(assemblyPath);
+        var target = assemblyPaths.Select(Normalize).ToHashSet();
         var attached = 0;
 
         foreach (var panel in EnumeratePanels(application))
@@ -52,11 +51,11 @@ internal static class RibbonCommandRedirect
         return attached;
     }
 
-    private static int Visit(RibbonItem item, string target, Func<string, bool> dispatch)
+    private static int Visit(RibbonItem item, HashSet<string> target, Func<string, bool> dispatch)
     {
         switch (item)
         {
-            case PushButton button when Normalize(button.AssemblyName) == target:
+            case PushButton button when target.Contains(Normalize(button.AssemblyName)):
                 return Hook(button, dispatch) ? 1 : 0;
 
             // SplitButton kế thừa PulldownButton nên cũng rơi vào đây. Nút xếp chồng thì
@@ -162,4 +161,3 @@ internal static class RibbonCommandRedirect
         }
     }
 }
-#endif

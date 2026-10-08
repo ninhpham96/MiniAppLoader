@@ -13,7 +13,7 @@ namespace MiniAppLoader.Core.Runtime;
 ///     Một <see cref="AssemblyLoadContext"/> collectible riêng cho MỖI plugin (không dùng
 ///     chung một context cho tất cả), để reload/unload plugin A không đụng tới plugin B.
 /// </summary>
-internal sealed class PluginLoadContext(string pluginDllPath, int slotIndex) : AssemblyLoadContext(isCollectible: true)
+internal sealed class PluginLoadContext(string pluginDllPath) : AssemblyLoadContext(isCollectible: true)
 {
     /// <summary>
     ///     Đọc <c>&lt;TênPlugin&gt;.deps.json</c> nằm cạnh DLL để biết plugin kéo theo NuGet
@@ -46,9 +46,27 @@ internal sealed class PluginLoadContext(string pluginDllPath, int slotIndex) : A
                || assemblyName.Equals(typeof(PluginLoadContext).Assembly.GetName().Name, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    ///     Thư viện WPF ghi đè metadata của DependencyProperty trên kiểu CÓ SẴN của WPF
+    ///     (<c>TextBlock</c>…) trong static constructor. Registry đó là của cả tiến trình, nên bản
+    ///     thứ hai của thư viện (sau reload, ở ALC mới) ném
+    ///     <c>"PropertyMetadata is already registered for type 'TextBlock'"</c> ngay khi mở cửa sổ.
+    ///     Nạp MỘT lần vào context mặc định và dùng chung cho mọi lần reload.
+    ///     Đánh đổi: đổi phiên bản các thư viện này cần mở lại Revit.
+    /// </summary>
+    private static bool MustLoadOnce(string? assemblyName)
+        => assemblyName is not null && (assemblyName.Equals("Wpf.Ui", StringComparison.OrdinalIgnoreCase)
+                                        || assemblyName.StartsWith("Wpf.Ui.", StringComparison.OrdinalIgnoreCase));
+
     protected override Assembly? Load(AssemblyName assemblyName)
     {
         if (MustShareWithHost(assemblyName.Name)) return null;
+
+        if (MustLoadOnce(assemblyName.Name))
+        {
+            var shared = LoadSharedOnce(assemblyName);
+            if (shared is not null) return shared;
+        }
 
         // Dependency riêng của plugin -> nạp PRIVATE vào context này để nó bị gỡ cùng lúc với
         // plugin, và để plugin dùng đúng PHIÊN BẢN nó build cùng. Resolver đọc .deps.json nên
@@ -57,26 +75,32 @@ internal sealed class PluginLoadContext(string pluginDllPath, int slotIndex) : A
         var path = _resolver.ResolveAssemblyToPath(assemblyName);
         if (path is null) return null;
 
-        // Dependency nằm NGAY trong thư mục output của plugin cũng phải đi qua bản shadow, giống
-        // DLL chính. Nạp thẳng từ đó thì file bị khoá cho tới hết phiên, và bước build của chính
-        // plugin (ILRepack của template Nice3point gom rồi XOÁ các dll phụ thuộc trong bin) thất
-        // bại với "Unable to delete file ...Toolkit.dll". Dependency ở nơi khác (NuGet cache) thì
-        // không ai build đè lên, cứ nạp thẳng.
-        if (IsInPluginDirectory(path)) path = ShadowCopy.Create(path, $"slot{slotIndex}");
-
+        // pluginDllPath là bản MIRROR của thư mục output (xem ShadowCopy.Mirror), nên dependency
+        // nằm cạnh nó cũng là bản sao — nạp thẳng không khoá file thật. Dependency ở nơi khác
+        // (NuGet cache) thì không ai build đè lên, cứ nạp thẳng.
         return LoadFromAssemblyPath(path);
     }
 
-    private bool IsInPluginDirectory(string path) => string.Equals(
-        Path.GetDirectoryName(path), Path.GetDirectoryName(pluginDllPath), StringComparison.OrdinalIgnoreCase);
-
-    public Assembly LoadPlugin(string dllPath, int slotIndex)
+    private Assembly? LoadSharedOnce(AssemblyName assemblyName)
     {
-        // Nạp qua bản shadow để Assembly.Location không rỗng — xem ShadowCopy.
-        // Tên shadow cố định theo slot (ALC unload xong là nhả khoá) nên không cộng dồn rác.
-        var shadowDll = ShadowCopy.Create(dllPath, $"slot{slotIndex}");
-        return LoadFromAssemblyPath(shadowDll);
+        var existing = Default.Assemblies.FirstOrDefault(loaded => string.Equals(loaded.GetName().Name, assemblyName.Name, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null) return existing;
+
+        var path = _resolver.ResolveAssemblyToPath(assemblyName)
+                   ?? Path.Combine(Path.GetDirectoryName(pluginDllPath)!, assemblyName.Name + ".dll");
+        if (!File.Exists(path)) return null;
+
+        // Bản của riêng nó, ngoài thư mục mirror: file này nằm lại cả phiên nên không được để
+        // thư mục mirror của slot bị kẹt khi dọn.
+        var sharedDirectory = Path.Combine(ShadowCopy.MirrorRoot, "shared");
+        Directory.CreateDirectory(sharedDirectory);
+        var sharedPath = Path.Combine(sharedDirectory, Guid.NewGuid().ToString("N") + "-" + Path.GetFileName(path));
+        File.Copy(path, sharedPath);
+
+        return Default.LoadFromAssemblyPath(sharedPath);
     }
+
+    public Assembly LoadPlugin(string mirroredDllPath) => LoadFromAssemblyPath(mirroredDllPath);
 }
 
 /// <summary>
@@ -101,6 +125,7 @@ internal sealed class AlcPluginRuntime : IPluginRuntime
     private readonly Dictionary<int, PluginLoadContext> _contexts = [];
     private readonly Dictionary<int, List<WeakReference>> _unloading = [];
     private readonly Dictionary<int, string> _dllPaths = [];
+    private static bool _mirrorsPurged;
 
     public Assembly Load(PluginSlot slot)
     {
@@ -108,10 +133,22 @@ internal sealed class AlcPluginRuntime : IPluginRuntime
 
         _dllPaths[slot.Index] = slot.DllPath;
 
-        var context = new PluginLoadContext(slot.DllPath, slot.Index);
+        // Dọn mirror của các lần nạp trước (và rác phiên trước, lần nạp đầu tiên) TRƯỚC khi
+        // tạo mirror mới. Mirror của ALC vừa gỡ có thể chưa nhả — để lần sau.
+        if (!_mirrorsPurged)
+        {
+            _mirrorsPurged = true;
+            ShadowCopy.CleanupMirrors();
+            try { Directory.Delete(Path.Combine(ShadowCopy.MirrorRoot, "shared"), recursive: true); } catch (Exception) { /* phiên Revit khác đang dùng */ }
+        }
+        else ShadowCopy.CleanupMirrors(keep: [], namePrefix: $"slot{slot.Index}-");
+
+        var mirroredDll = ShadowCopy.Mirror(slot.DllPath, slot.Index);
+
+        var context = new PluginLoadContext(mirroredDll);
         _contexts[slot.Index] = context;
 
-        return context.LoadPlugin(slot.DllPath, slot.Index);
+        return context.LoadPlugin(mirroredDll);
     }
 
     public UnloadResult Unload(int slotIndex)

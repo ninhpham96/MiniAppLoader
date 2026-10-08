@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 
 namespace MiniAppLoader.Core.Runtime;
@@ -83,6 +85,71 @@ internal static class ShadowCopy
         }
 
         return shadowDll;
+    }
+
+    /// <summary>Thư mục gốc chứa các bản sao nguyên thư mục output của plugin (chỉ dùng cho ALC).</summary>
+    public static string MirrorRoot { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MiniAppLoader", "mirror");
+
+    /// <summary>
+    ///     Sao CẢ thư mục output của plugin sang một thư mục tạm mới và trả về đường dẫn DLL chính
+    ///     trong đó (giữ nguyên tên file gốc).
+    ///     <para>
+    ///         Shadow từng DLL (<see cref="Create"/>) chỉ bảo vệ được file do LOADER nạp. Plugin
+    ///         tự nạp thêm từ thư mục chứa nó (vd. <c>LoadFromAssemblyPath</c> cho mọi
+    ///         <c>*.dll</c> cạnh <c>Assembly.Location</c>) thì khoá thẳng bản gốc và build kế
+    ///         tiếp của chính plugin báo "file đang được sử dụng". Cho plugin sống hẳn trong một
+    ///         bản sao: <c>Assembly.Location</c> trỏ vào đó, nên mọi đường nạp — của loader lẫn
+    ///         của plugin — chỉ chạm bản sao, thư mục output thật luôn ghi đè được.
+    ///     </para>
+    ///     <para>Mỗi lần nạp một thư mục MỚI: bản của lần nạp trước có thể còn bị khoá tới khi ALC cũ được GC.</para>
+    /// </summary>
+    public static string Mirror(string dllPath, int slotIndex)
+    {
+        var source = Path.GetDirectoryName(dllPath)!;
+        var target = Path.Combine(MirrorRoot, $"slot{slotIndex}-{Guid.NewGuid():N}");
+
+        CopyDirectory(source, target);
+        return Path.Combine(target, Path.GetFileName(dllPath));
+    }
+
+    private static void CopyDirectory(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            // Rác shadow kiểu cũ nằm cạnh DLL gốc — không có lý do để mang theo.
+            if (Path.GetFileName(file).Contains(SiblingMarker, StringComparison.Ordinal)) continue;
+
+            File.Copy(file, Path.Combine(target, Path.GetFileName(file)), overwrite: true);
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(source))
+        {
+            if (Path.GetFileName(directory) == ShadowDirName) continue;
+
+            CopyDirectory(directory, Path.Combine(target, Path.GetFileName(directory)));
+        }
+    }
+
+    /// <summary>
+    ///     Xoá (best-effort) các thư mục mirror, trừ những thư mục trong <paramref name="keep"/>.
+    ///     Thư mục còn bị khoá (ALC chưa nhả, hoặc phiên Revit khác) thì bỏ qua, lần sau dọn tiếp.
+    /// </summary>
+    public static void CleanupMirrors(IReadOnlyCollection<string>? keep = null, string? namePrefix = null)
+    {
+        if (!Directory.Exists(MirrorRoot)) return;
+
+        foreach (var directory in Directory.EnumerateDirectories(MirrorRoot))
+        {
+            if (namePrefix is not null && !Path.GetFileName(directory).StartsWith(namePrefix, StringComparison.Ordinal)) continue;
+            if (Path.GetFileName(directory) == "shared") continue; // đang nạp vào context mặc định
+            if (keep is not null && keep.Contains(directory, StringComparer.OrdinalIgnoreCase)) continue;
+
+            try { Directory.Delete(directory, recursive: true); }
+            catch (Exception exception) when (IsFileLocked(exception)) { /* còn bị khoá, để lần sau */ }
+        }
     }
 
     /// <summary>Dọn (best-effort) các bản shadow cũ nằm cạnh <paramref name="dllPath"/>.</summary>

@@ -69,19 +69,27 @@ internal sealed class ReloadPipeline : IDisposable
 
         var watchers = new List<FileSystemWatcher>();
 
-        // Theo dõi cả .deps.json: trên .NET Core nó quyết định dependency nào được phân giải,
-        // và MSBuild có thể ghi nó SAU file .dll.
-        foreach (var fileName in new[] { Path.GetFileName(slot.DllPath), Path.GetFileNameWithoutExtension(slot.DllPath) + ".deps.json" })
+        // Theo dõi MỌI dll + .deps.json trong thư mục output, không chỉ DLL chính: plugin nhiều
+        // project (App/Action/View/Model…) thường chỉ build lại project con, DLL chính không đổi
+        // mà code đã khác. Trên .NET Core .deps.json quyết định dependency nào được phân giải,
+        // và MSBuild có thể ghi nó SAU file .dll. Bản shadow cạnh DLL (*~slotN.*) là của loader.
+        foreach (var filter in new[] { "*.dll", "*.deps.json" })
         {
-            var watcher = new FileSystemWatcher(directory!, fileName)
+            var watcher = new FileSystemWatcher(directory!, filter)
             {
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
                 EnableRaisingEvents = true
             };
 
-            watcher.Changed += (_, _) => OnFileTouched(slot.Index);
-            watcher.Created += (_, _) => OnFileTouched(slot.Index);
-            watcher.Renamed += (_, _) => OnFileTouched(slot.Index);
+            void Touched(object _, FileSystemEventArgs args)
+            {
+                if (args.Name is not null && args.Name.Contains("~slot", StringComparison.Ordinal)) return;
+                OnFileTouched(slot.Index);
+            }
+
+            watcher.Changed += Touched;
+            watcher.Created += Touched;
+            watcher.Renamed += (_, args) => Touched(_, args);
 
             watchers.Add(watcher);
         }

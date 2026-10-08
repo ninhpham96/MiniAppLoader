@@ -438,13 +438,12 @@ public sealed class PluginHost
     /// </summary>
     private void RedirectCommands(PluginSlot slot, UIControlledApplication application)
     {
-#if NET8_0_OR_GREATER
         try
         {
             var location = _loader.LoadedLocation(slot);
             if (location is null || Slots.DispatchCommandId is null) return;
 
-            var count = RibbonCommandRedirect.Attach(application, location, className => DispatchApplicationCommand(slot, className));
+            var count = RibbonCommandRedirect.Attach(application, [location, slot.DllPath], className => DispatchApplicationCommand(slot, className));
 
             if (count > 0) Log.Information("'{Id}': {Count} nút ribbon chạy code mới nhất sau mỗi lần build", slot.Id, count);
             else Log.Debug("'{Id}': không tìm thấy nút ribbon nào để chuyển hướng", slot.Id);
@@ -453,7 +452,6 @@ public sealed class PluginHost
         {
             Log.Warning(exception, "'{Id}': không gắn được bộ chuyển hướng nút ribbon", slot.Id);
         }
-#endif
     }
 
     /// <summary>Slot và tên class đang chờ chạy — đặt ngay trước <c>PostCommand</c>.</summary>
